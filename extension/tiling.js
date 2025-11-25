@@ -20,6 +20,7 @@ import * as snap from './snap.js';
 var masks = []; // Visual feedback masks for windows being dragged
 var working_windows = []; // Current set of window descriptors being tiled
 var tmp_swap = []; // Temporary swap for preview during drag
+var isDragging = false; // Flag to disable snap logic during drag
 
 /**
  * WindowDescriptor class
@@ -432,6 +433,20 @@ export function getMask(window) {
     return window;
 }
 
+/**
+ * Enable drag mode - disables snap logic during drag operations
+ */
+export function enableDragMode() {
+    isDragging = true;
+}
+
+/**
+ * Disable drag mode - re-enables snap logic after drag completes
+ */
+export function disableDragMode() {
+    isDragging = false;
+}
+
 export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor, keep_oversized_windows) {
     let working_info = getWorkingInfo(workspace, reference_meta_window, _monitor);
     if(!working_info) return;
@@ -443,7 +458,8 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
     const workspace_windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
     
     // SNAP DETECTION: Check for snapped windows
-    const snappedWindows = snap.getSnappedWindows(workspace, monitor);
+    // IMPORTANT: Skip snap logic during drag operations to prevent interference
+    const snappedWindows = isDragging ? [] : snap.getSnappedWindows(workspace, monitor);
     
     if (snappedWindows.length > 0) {
         console.log(`[MOSAIC WM] Found ${snappedWindows.length} snapped window(s)`);

@@ -9,6 +9,7 @@
 import * as tiling from './tiling.js';
 import * as windowing from './windowing.js';
 import * as constants from './constants.js';
+import * as snap from './snap.js';
 
 // Module state for drag operations
 var dragStart = false; // Whether a drag operation is in progress
@@ -41,6 +42,7 @@ export function cursorDistance(cursor, frame) {
 export function drag(meta_window, child_frame, id, windows) {
     let workspace = meta_window.get_workspace();
     let monitor = meta_window.get_monitor();
+    let workArea = workspace.get_work_area_for_monitor(monitor);
 
     // Get current cursor position
     let _cursor = global.get_pointer();
@@ -48,11 +50,28 @@ export function drag(meta_window, child_frame, id, windows) {
         x: _cursor[0],
         y: _cursor[1]
     }
+    
+    // SNAP AWARENESS: Filter out snapped windows from reordering
+    // Snapped windows stay in place, only non-snapped can be reordered
+    const snappedWindows = snap.getSnappedWindows(workspace, monitor);
+    const snappedIds = snappedWindows.map(s => s.window.get_id());
+    
+    // Filter windows to only non-snapped ones for reordering
+    const reorderableWindows = windows.filter(w => !snappedIds.includes(w.id));
+    
+    // If dragged window is snapped, don't allow it to be reordered
+    // But don't block the entire drag operation
+    if (snappedIds.includes(id)) {
+        // Snapped window can't be reordered, just return without doing anything
+        if(dragStart)
+            dragTimeout = setTimeout(() => { drag(meta_window, child_frame, id, windows); }, constants.DRAG_UPDATE_INTERVAL_MS);
+        return;
+    }
 
-    // Find the window closest to the cursor
+    // Find the window closest to the cursor (only among non-snapped windows)
     let minimum_distance = Infinity;
     let target_id = null;
-    for(let window of windows) {
+    for(let window of reorderableWindows) {
         let distance = cursorDistance(cursor, window);
         if(distance < minimum_distance)
         {
@@ -89,11 +108,23 @@ export function startDrag(meta_window) {
     let monitor = meta_window.get_monitor();
     let meta_windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
     tiling.applySwaps(workspace, meta_windows);
-    let descriptors = tiling.windowsToDescriptors(meta_windows, monitor);
+    
+    // SNAP AWARENESS: Only create descriptors for non-snapped windows
+    // Snapped windows should not be part of the reordering system
+    const snappedWindows = snap.getSnappedWindows(workspace, monitor);
+    const snappedIds = snappedWindows.map(s => s.window.get_id());
+    
+    // Filter to only non-snapped windows
+    const nonSnappedMetaWindows = meta_windows.filter(w => !snappedIds.includes(w.get_id()));
+    
+    let descriptors = tiling.windowsToDescriptors(nonSnappedMetaWindows, monitor);
 
     // Create visual mask for the dragged window
     tiling.createMask(meta_window);
     tiling.clearTmpSwap();
+    
+    // Enable drag mode to disable snap logic during drag
+    tiling.enableDragMode();
 
     dragStart = true;
     drag(meta_window, meta_window.get_frame_rect(), meta_window.get_id(), JSON.parse(JSON.stringify(descriptors)));
@@ -110,6 +141,9 @@ export function stopDrag(meta_window, skip_apply) {
     let workspace = meta_window.get_workspace();
     dragStart = false;
     clearTimeout(dragTimeout);
+    
+    // Disable drag mode to re-enable snap logic
+    tiling.disableDragMode();
  
     tiling.destroyMasks();
     if(!skip_apply)
