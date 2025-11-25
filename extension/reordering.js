@@ -107,24 +107,26 @@ export function startDrag(meta_window) {
     let workspace = meta_window.get_workspace()
     let monitor = meta_window.get_monitor();
     let meta_windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
-    tiling.applySwaps(workspace, meta_windows);
     
-    // SNAP AWARENESS: Only create descriptors for non-snapped windows
-    // Snapped windows should not be part of the reordering system
+    // SNAP AWARENESS: Check for snapped windows BEFORE starting drag
     const snappedWindows = snap.getSnappedWindows(workspace, monitor);
-    const snappedIds = snappedWindows.map(s => s.window.get_id());
     
-    // Filter to only non-snapped windows
-    const nonSnappedMetaWindows = meta_windows.filter(w => !snappedIds.includes(w.get_id()));
+    // TEMPORARY LIMITATION: Disable reordering when snap is active
+    // This is because swap indices don't work correctly with mixed snapped/non-snapped windows
+    if (snappedWindows.length > 0) {
+        console.log('[MOSAIC WM] Reordering disabled when snap is active (temporary limitation)');
+        return; // Don't start drag
+    }
     
-    let descriptors = tiling.windowsToDescriptors(nonSnappedMetaWindows, monitor);
+    tiling.applySwaps(workspace, meta_windows);
+    let descriptors = tiling.windowsToDescriptors(meta_windows, monitor);
 
     // Create visual mask for the dragged window
     tiling.createMask(meta_window);
     tiling.clearTmpSwap();
     
-    // Enable drag mode to disable snap logic during drag
-    tiling.enableDragMode();
+    // No snap, so no remaining space needed
+    tiling.enableDragMode(null);
 
     dragStart = true;
     drag(meta_window, meta_window.get_frame_rect(), meta_window.get_id(), JSON.parse(JSON.stringify(descriptors)));

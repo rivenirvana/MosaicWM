@@ -21,6 +21,7 @@ var masks = []; // Visual feedback masks for windows being dragged
 var working_windows = []; // Current set of window descriptors being tiled
 var tmp_swap = []; // Temporary swap for preview during drag
 var isDragging = false; // Flag to disable snap logic during drag
+var dragRemainingSpace = null; // Remaining space to use during drag (when snap is active)
 
 /**
  * WindowDescriptor class
@@ -387,6 +388,8 @@ function getWorkingInfo(workspace, window, monitor) {
 }
 
 function drawTile(tile_info, work_area, meta_windows) {
+    console.log(`[MOSAIC WM] drawTile called with work_area: x=${work_area.x}, y=${work_area.y}, w=${work_area.width}, h=${work_area.height}`);
+    
     let levels = tile_info.levels;
     let _x = tile_info.x;
     let _y = tile_info.y;
@@ -435,9 +438,11 @@ export function getMask(window) {
 
 /**
  * Enable drag mode - disables snap logic during drag operations
+ * @param {Object|null} remainingSpace - The remaining space to use for tiling during drag (null for full workspace)
  */
-export function enableDragMode() {
+export function enableDragMode(remainingSpace = null) {
     isDragging = true;
+    dragRemainingSpace = remainingSpace;
 }
 
 /**
@@ -445,6 +450,7 @@ export function enableDragMode() {
  */
 export function disableDragMode() {
     isDragging = false;
+    dragRemainingSpace = null;
 }
 
 export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor, keep_oversized_windows) {
@@ -518,8 +524,11 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
         }
     }
     
+    // DRAG MODE: Use stored remaining space for calculations if in drag mode
+    const tileArea = isDragging && dragRemainingSpace ? dragRemainingSpace : work_area;
+    
     // No snaps or no special handling needed - normal tiling
-    let tile_info = tile(windows, work_area);
+    let tile_info = tile(windows, tileArea);
     let overflow = tile_info.overflow;
     
     if (workspace_windows.length <= 1) {
@@ -540,9 +549,12 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
             }
         }
         windowing.moveOversizedWindow(reference_meta_window);
-        tile_info = tile(_windows, work_area);
+        tile_info = tile(_windows, tileArea);
     }
-    drawTile(tile_info, work_area, meta_windows);
+    
+    // Use the same area for drawing that was used for tiling
+    console.log(`[MOSAIC WM] Drawing tiles - isDragging: ${isDragging}, has dragRemainingSpace: ${!!dragRemainingSpace}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
+    drawTile(tile_info, tileArea, meta_windows);
     return overflow;
 }
 
