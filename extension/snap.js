@@ -13,6 +13,9 @@
  * @param {Object} workArea - Work area {x, y, width, height}
  * @returns {{snapped: boolean, zone: string|null}} Snap state and zone
  */
+
+import * as windowing from './windowing.js';
+
 export function detectSnap(window, workArea) {
     const frame = window.get_frame_rect();
     const tolerance = 10; // Pixels of tolerance for snap detection
@@ -83,7 +86,7 @@ export function detectSnap(window, workArea) {
  * @returns {Array<{window: Meta.Window, zone: string}>} Snapped windows with their zones
  */
 export function getSnappedWindows(workspace, monitor) {
-    const windows = getMonitorWorkspaceWindows(workspace, monitor);
+    const windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
     const workArea = workspace.get_work_area_for_monitor(monitor);
     const snapped = [];
     
@@ -170,7 +173,7 @@ export function calculateRemainingSpace(workspace, monitor) {
  * @returns {Meta.Window[]} Non-snapped windows
  */
 export function getNonSnappedWindows(workspace, monitor) {
-    const windows = getMonitorWorkspaceWindows(workspace, monitor);
+    const windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
     const workArea = workspace.get_work_area_for_monitor(monitor);
     
     return windows.filter(window => {

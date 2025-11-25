@@ -14,6 +14,7 @@ import * as constants from './constants.js';
 import * as windowing from './windowing.js';
 import * as reordering from './reordering.js';
 import * as drawing from './drawing.js';
+import * as snap from './snap.js';
 
 // Module-level state for tiling operations
 var masks = []; // Visual feedback masks for windows being dragged
@@ -440,8 +441,71 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
     let monitor = working_info.monitor;
 
     const workspace_windows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
+    
+    // SNAP DETECTION: Check for snapped windows
+    const snappedWindows = snap.getSnappedWindows(workspace, monitor);
+    
+    if (snappedWindows.length > 0) {
+        console.log(`[MOSAIC WM] Found ${snappedWindows.length} snapped window(s)`);
+        
+        // Check if we have 2 half-snaps (left + right = fully occupied)
+        const zones = snappedWindows.map(w => w.zone);
+        if (zones.includes('left') && zones.includes('right')) {
+            console.log('[MOSAIC WM] Two half-snaps detected - workspace fully occupied');
+            
+            // Get non-snapped windows
+            const nonSnappedMeta = snap.getNonSnappedWindows(workspace, monitor);
+            
+            // Move all non-snapped windows to new workspace
+            for (const window of nonSnappedMeta) {
+                if (!windowing.isExcluded(window)) {
+                    console.log('[MOSAIC WM] Moving non-snapped window to new workspace');
+                    windowing.moveOversizedWindow(window);
+                }
+            }
+            
+            return; // Don't tile, snapped windows stay in place
+        }
+        
+        // Single snap or quarter snaps - calculate remaining space
+        const remainingSpace = snap.calculateRemainingSpace(workspace, monitor);
+        
+        if (remainingSpace) {
+            console.log('[MOSAIC WM] Tiling in remaining space after snap');
+            
+            // Get non-snapped windows
+            const nonSnappedMeta = snap.getNonSnappedWindows(workspace, monitor);
+            
+            // Convert to descriptors using createDescriptor
+            const nonSnappedDescriptors = [];
+            for (let i = 0; i < meta_windows.length; i++) {
+                const window = meta_windows[i];
+                const isSnapped = snappedWindows.some(s => s.window.get_id() === window.get_id());
+                
+                if (!isSnapped) {
+                    // Use createDescriptor to properly filter and create descriptor
+                    const descriptor = createDescriptor(window, monitor, i, reference_meta_window);
+                    if (descriptor) {
+                        nonSnappedDescriptors.push(descriptor);
+                    }
+                }
+            }
+            
+            // Tile non-snapped windows in remaining space
+            if (nonSnappedDescriptors.length > 0) {
+                console.log(`[MOSAIC WM] Tiling ${nonSnappedDescriptors.length} non-snapped windows in remaining space`);
+                const tile_info = tile(nonSnappedDescriptors, remainingSpace);
+                drawTile(tile_info, remainingSpace, meta_windows);
+            }
+            
+            return;
+        }
+    }
+    
+    // No snaps or no special handling needed - normal tiling
     let tile_info = tile(windows, work_area);
     let overflow = tile_info.overflow;
+    
     if (workspace_windows.length <= 1) {
         overflow = false;
     } else {
