@@ -169,20 +169,54 @@ export default class WindowMosaicExtension extends Extension {
             const managedWindows = windows.filter(w => !windowing.isExcluded(w));
             
             if (managedWindows.length === 0) {
-                console.log('[MOSAIC WM] Workspace is empty - navigating to previous workspace');
+                console.log('[MOSAIC WM] Workspace is empty - checking if should navigate');
                 
-                const previousWorkspace = workspace.get_neighbor(Meta.MotionDirection.LEFT);
+                const workspaceManager = global.workspace_manager;
+                const currentIndex = workspace.index();
                 
-                if (previousWorkspace && previousWorkspace.index() !== workspace.index()) {
-                    previousWorkspace.activate(global.get_current_time());
-                    console.log(`[MOSAIC WM] Navigated to workspace ${previousWorkspace.index()}`);
-                } else {
-                    const nextWorkspace = workspace.get_neighbor(Meta.MotionDirection.RIGHT);
-                    
-                    if (nextWorkspace && nextWorkspace.index() !== workspace.index()) {
-                        nextWorkspace.activate(global.get_current_time());
-                        console.log(`[MOSAIC WM] Navigated to workspace ${nextWorkspace.index()}`);
+                // Only navigate away if:
+                // 1. We're not in workspace 0 (first workspace), OR
+                // 2. There's a non-empty workspace to navigate to
+                
+                // Check if there's a previous non-empty workspace
+                let shouldNavigate = false;
+                let targetWorkspace = null;
+                
+                if (currentIndex > 0) {
+                    // Try to navigate to previous workspace
+                    const previousWorkspace = workspace.get_neighbor(Meta.MotionDirection.LEFT);
+                    if (previousWorkspace && previousWorkspace.index() !== currentIndex) {
+                        const prevWindows = windowing.getMonitorWorkspaceWindows(previousWorkspace, monitor);
+                        const prevManagedWindows = prevWindows.filter(w => !windowing.isExcluded(w));
+                        
+                        if (prevManagedWindows.length > 0) {
+                            shouldNavigate = true;
+                            targetWorkspace = previousWorkspace;
+                            console.log(`[MOSAIC WM] Found non-empty previous workspace ${previousWorkspace.index()}`);
+                        }
                     }
+                }
+                
+                // If no previous non-empty workspace, check next (but only if we're not in workspace 0)
+                if (!shouldNavigate && currentIndex > 0) {
+                    const nextWorkspace = workspace.get_neighbor(Meta.MotionDirection.RIGHT);
+                    if (nextWorkspace && nextWorkspace.index() !== currentIndex) {
+                        const nextWindows = windowing.getMonitorWorkspaceWindows(nextWorkspace, monitor);
+                        const nextManagedWindows = nextWindows.filter(w => !windowing.isExcluded(w));
+                        
+                        if (nextManagedWindows.length > 0) {
+                            shouldNavigate = true;
+                            targetWorkspace = nextWorkspace;
+                            console.log(`[MOSAIC WM] Found non-empty next workspace ${nextWorkspace.index()}`);
+                        }
+                    }
+                }
+                
+                if (shouldNavigate && targetWorkspace) {
+                    targetWorkspace.activate(global.get_current_time());
+                    console.log(`[MOSAIC WM] Navigated to workspace ${targetWorkspace.index()}`);
+                } else {
+                    console.log('[MOSAIC WM] Staying in current workspace (workspace 0 or no non-empty workspaces available)');
                 }
             }
         }
