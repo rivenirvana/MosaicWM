@@ -144,9 +144,15 @@ export default class WindowMosaicExtension extends Extension {
     _destroyedHandler = (_, win) => {
         let window = win.meta_window;
         let monitor = window.get_monitor();
+        const windowId = window.get_id();
         
         // Disconnect workspace-changed signal
         this._disconnectWindowWorkspaceSignal(window);
+        
+        // Clean up tracking Maps to prevent memory leaks
+        this._windowPreviousWorkspace.delete(windowId);
+        this._windowRemovedTimestamp.delete(windowId);
+        this._manualWorkspaceMove.delete(windowId);
         
         // Only process if window was managed (not excluded/blacklisted)
         if(windowing.isExcluded(window)) {
