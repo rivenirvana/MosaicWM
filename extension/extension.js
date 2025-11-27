@@ -19,10 +19,12 @@
 /* exported init */
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import Meta from 'gi://Meta';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as windowing from './windowing.js';
 import * as tiling from './tiling.js';
 import * as drawing from './drawing.js';
 import * as reordering from './reordering.js';
+import * as snap from './snap.js';
 import * as constants from './constants.js';
 
 function tileWindowWorkspace(meta_window) {
@@ -45,6 +47,7 @@ export default class WindowMosaicExtension extends Extension {
         this._maximizedWindows = [];
         this._workspaceManager = global.workspace_manager;
         this._sizeChanged = false;
+        this._resizeOverflowWindow = null;
         this._tileTimeout = null;
         this._windowWorkspaceSignals = new Map(); // window_id -> signal_id for workspace-changed
         this._workspaceChangeTimeout = null; // Debounce timeout for manual workspace changes
@@ -370,7 +373,33 @@ export default class WindowMosaicExtension extends Extension {
         if(!this._sizeChanged && !windowing.isExcluded(window)) {
             // Live resizing
             this._sizeChanged = true;
-            tiling.tileWorkspaceWindows(window.get_workspace(), window, window.get_monitor(), true);
+            
+            // Check if resize causes overflow
+            let workspace = window.get_workspace();
+            let monitor = window.get_monitor();
+            
+            // Only check overflow if window is being actively resized (not maximized/snapped)
+            let workArea = workspace.get_work_area_for_monitor(monitor);
+            let snapState = snap.detectSnap(window, workArea);
+            if (!windowing.isMaximizedOrFullscreen(window) && !snapState.snapped) {
+                let canFit = tiling.canFitWindow(window, workspace, monitor);
+                
+                if (!canFit) {
+                    // Track overflow state
+                    if (this._resizeOverflowWindow !== window) {
+                        this._resizeOverflowWindow = window;
+                        console.log('[MOSAIC WM] Resize overflow detected - window too large');
+                    }
+                } else {
+                    // Clear overflow state if window fits again
+                    if (this._resizeOverflowWindow === window) {
+                        this._resizeOverflowWindow = null;
+                        console.log('[MOSAIC WM] Resize overflow cleared - window fits again');
+                    }
+                }
+            }
+            
+            tiling.tileWorkspaceWindows(workspace, window, monitor, true);
             this._sizeChanged = false;
         }
     }
@@ -402,13 +431,29 @@ export default class WindowMosaicExtension extends Extension {
     _grabOpEndHandler = (_, window, grabpo) => {
         if(!windowing.isExcluded(window)) {
             reordering.stopDrag(window);
+            
+            // Log grab operation for debugging
+            console.log(`[MOSAIC WM] Grab operation ended: ${grabpo}`);
+            
             if( (grabpo === 1 || grabpo === 1025) && // When a window has moved
                 !(windowing.isMaximizedOrFullscreen(window)))
             {
                 tiling.tileWorkspaceWindows(window.get_workspace(), window, window.get_monitor(), false);
             }
-            if(grabpo === 25601) // When released from resizing
-                tileWindowWorkspace(window);
+            if(grabpo === 20481) { // When released from resizing
+                // Check if resize ended with overflow - move to new workspace
+                if (this._resizeOverflowWindow === window) {
+                    console.log('[MOSAIC WM] Resize ended with overflow - moving window to new workspace');
+                    let oldWorkspace = window.get_workspace();
+                    let newWorkspace = windowing.moveOversizedWindow(window);
+                    if (newWorkspace) {
+                        tiling.tileWorkspaceWindows(oldWorkspace, false, window.get_monitor(), false);
+                    }
+                    this._resizeOverflowWindow = null;
+                } else {
+                    tileWindowWorkspace(window);
+                }
+            }
         } else
             reordering.stopDrag(window, true);
     }

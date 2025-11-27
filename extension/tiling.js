@@ -266,12 +266,20 @@ function tile(windows, work_area) {
 
         y = (work_area.height - total_height) / 2 + work_area.y;
     }
+    
+    // Collect all windows from all levels for return
+    let all_windows = [];
+    for (let level of levels) {
+        all_windows = all_windows.concat(level.windows);
+    }
+    
     return {
         x: x,
         y: y,
         overflow: overflow,
         vertical: vertical,
-        levels: levels
+        levels: levels,
+        windows: all_windows  // Return windows for post-tile validation
     }
 }
 
@@ -613,6 +621,34 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
     console.log(`[MOSAIC WM] Drawing tiles - isDragging: ${isDragging}, has dragRemainingSpace: ${!!dragRemainingSpace}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
     drawTile(tile_info, tileArea, meta_windows);
     return overflow;
+}
+
+/**
+ * Calculates minimum acceptable window size for overflow detection
+ * 
+ * Uses dynamic calculation based on:
+ * - Available workspace area
+ * - Number of windows that will be tiled
+ * - Minimum acceptable dimensions per window
+ * 
+ * @param {Object} availableSpace - Available area {x, y, width, height}
+ * @param {number} windowCount - Total number of windows (including new one)
+ * @returns {Object} Minimum size {width, height}
+ */
+function calculateMinimumWindowSize(availableSpace, windowCount) {
+    // Calculate area per window with breathing room (divide by windowCount * 3)
+    // The *3 factor ensures windows don't get too cramped
+    const areaPerWindow = (availableSpace.width * availableSpace.height) / (windowCount * 3);
+    
+    // Calculate balanced dimensions (square root gives balanced width/height)
+    const size = Math.sqrt(areaPerWindow);
+    
+    // Apply minimum thresholds to prevent tiny windows
+    // Width: minimum 350px, Height: minimum 250px (slightly narrower aspect ratio)
+    return {
+        width: Math.max(Math.floor(size), 350),
+        height: Math.max(Math.floor(size * 0.75), 250)
+    };
 }
 
 /**
