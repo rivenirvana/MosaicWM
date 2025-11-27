@@ -9,6 +9,7 @@
  */
 
 import * as tiling from './tiling.js';
+import * as snap from './snap.js';
 
 /**
  * Gets the current timestamp from GNOME Shell.
@@ -134,6 +135,62 @@ export function moveBackWindow(window) {
  * @param {Meta.Window} window - The window to move
  * @returns {Meta.Workspace} The new workspace where the window was moved
  */
+/**
+ * Attempts to tile a window with an existing snapped window in the workspace.
+ * If the window cannot be tiled (e.g., fixed size), returns it to the previous workspace.
+ * 
+ * @param {Meta.Window} window - The window to tile
+ * @param {Meta.Window} snappedWindow - The existing snapped window
+ * @param {Meta.Workspace} previousWorkspace - The workspace to return to if tiling fails
+ * @returns {boolean} True if tiling succeeded, false if window was returned
+ */
+export function tryTileWithSnappedWindow(window, snappedWindow, previousWorkspace) {
+    // Get the snap state of the existing window
+    const workspace = window.get_workspace();
+    const monitor = window.get_monitor();
+    const workArea = workspace.get_work_area_for_monitor(monitor);
+    
+    const snapState = snap.detectSnap(snappedWindow, workArea);
+    
+    if (!snapState.snapped) {
+        console.log('[MOSAIC WM] Existing window is not snapped, cannot tile');
+        return false;
+    }
+    
+    // Determine opposite tile mode
+    let tileMode;
+    if (snapState.zone === 'left') {
+        tileMode = Meta.TileMode.RIGHT;
+    } else if (snapState.zone === 'right') {
+        tileMode = Meta.TileMode.LEFT;
+    } else {
+        console.log('[MOSAIC WM] Unsupported snap zone for tiling');
+        return false;
+    }
+    
+    // Check if window can be tiled
+    if (!window.can_tile()) {
+        console.log(`[MOSAIC WM] Window ${window.get_wm_class()} cannot be tiled - returning to previous workspace`);
+        if (previousWorkspace) {
+            window.change_workspace(previousWorkspace);
+        }
+        return false;
+    }
+    
+    // Attempt to tile the window
+    try {
+        window.tile(tileMode);
+        console.log(`[MOSAIC WM] Successfully tiled window ${window.get_wm_class()} in ${tileMode === Meta.TileMode.LEFT ? 'LEFT' : 'RIGHT'} mode`);
+        return true;
+    } catch (error) {
+        console.log(`[MOSAIC WM] Failed to tile window: ${error.message}`);
+        if (previousWorkspace) {
+            window.change_workspace(previousWorkspace);
+        }
+        return false;
+    }
+}
+
 export function moveOversizedWindow(window) {
     let previous_workspace = window.get_workspace();
     let new_workspace = global.workspace_manager.append_new_workspace(false, getTimestamp());
@@ -203,11 +260,30 @@ export function isExcluded(meta_window) {
  * @returns {boolean} True if the window should be tiled, false otherwise
  */
 export function isRelated(meta_window) {
-    if( !meta_window.is_attached_dialog() &&
-        meta_window.window_type === 0 &&
-        !meta_window.is_on_all_workspaces()
-    ) return true;
-    return false;
+    // Exclude attached dialogs
+    if (meta_window.is_attached_dialog()) {
+        return false;
+    }
+    
+    // Exclude non-normal window types (0 = META_WINDOW_NORMAL)
+    if (meta_window.window_type !== 0) {
+        return false;
+    }
+    
+    // Exclude windows on all workspaces
+    if (meta_window.is_on_all_workspaces()) {
+        return false;
+    }
+    
+    // Exclude transient windows (modals with parent window)
+    // This catches modal dialogs that have window_type === 0
+    if (meta_window.get_transient_for() !== null) {
+        const wmClass = meta_window.get_wm_class();
+        console.log(`[MOSAIC WM] Excluding transient/modal window: ${wmClass}`);
+        return false;
+    }
+    
+    return true;
 }
 
 /**

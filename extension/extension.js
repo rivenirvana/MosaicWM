@@ -502,6 +502,31 @@ export default class WindowMosaicExtension extends Extension {
                 if (hasValidDimensions && !windowing.isExcluded(WINDOW) && isOverviewDragDrop) {
                     console.log(`[MOSAIC WM] window-added: Overview drag-drop - window ${WINDOW.get_id()} from workspace ${previousWorkspaceIndex} to ${WORKSPACE.index()}`);
                     
+                    // Check if target workspace has exactly one snapped window
+                    const workspaceWindows = windowing.getMonitorWorkspaceWindows(WORKSPACE, MONITOR);
+                    const snappedWindows = workspaceWindows.filter(w => {
+                        const workArea = WORKSPACE.get_work_area_for_monitor(MONITOR);
+                        const snapState = snap.detectSnap(w, workArea);
+                        return snapState.snapped && w.get_id() !== WINDOW.get_id();
+                    });
+                    
+                    if (snappedWindows.length === 1 && workspaceWindows.length === 2) {
+                        // Try to tile with the snapped window
+                        console.log(`[MOSAIC WM] Attempting to tile with snapped window`);
+                        const previousWorkspace = this._workspaceManager.get_workspace_by_index(previousWorkspaceIndex);
+                        const tileSuccess = windowing.tryTileWithSnappedWindow(WINDOW, snappedWindows[0], previousWorkspace);
+                        
+                        if (tileSuccess) {
+                            // Clean up tracking
+                            this._windowPreviousWorkspace.delete(WINDOW.get_id());
+                            this._windowRemovedTimestamp.delete(WINDOW.get_id());
+                            this._manualWorkspaceMove.delete(WINDOW.get_id());
+                            return; // Don't do normal overflow check
+                        }
+                        // If tiling failed, window was already returned to previous workspace
+                        return;
+                    }
+                    
                     const canFit = tiling.canFitWindow(WINDOW, WORKSPACE, MONITOR);
                     
                     if (!canFit) {
