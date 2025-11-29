@@ -18,6 +18,8 @@
 
 /* exported init */
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as windowing from './windowing.js';
@@ -26,6 +28,8 @@ import * as drawing from './drawing.js';
 import * as reordering from './reordering.js';
 import * as snap from './snap.js';
 import * as constants from './constants.js';
+import { SettingsOverrider } from './settingsOverrider.js';
+import * as edgeTiling from './edgeTiling.js';
 
 function tileWindowWorkspace(meta_window) {
     if(!meta_window) return;
@@ -54,6 +58,14 @@ export default class WindowMosaicExtension extends Extension {
         this._windowPreviousWorkspace = new Map(); // window_id -> previous_workspace_index for overview drag-drop
         this._windowRemovedTimestamp = new Map(); // window_id -> timestamp when removed
         this._manualWorkspaceMove = new Map(); // window_id -> true if manual move (workspace-changed fired)
+        
+        // Edge tiling state
+        this._settingsOverrider = null;
+        this._draggedWindow = null;
+        this._dragMonitorId = null;
+        this._currentZone = edgeTiling.TileZone.NONE;
+        this._grabOpBeginId = null;
+        this._grabOpEndId = null;
     }
 
     _tileAllWorkspaces = () => {
@@ -122,7 +134,29 @@ export default class WindowMosaicExtension extends Extension {
                     }
                 }
                 
-                // CASE 2: Check if window FITS in current workspace
+                // CASE 2: Check if workspace has exactly one snapped window
+                // If so, try to tile the new window with it BEFORE checking overflow
+                const workspaceWindows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
+                const snappedWindows = workspaceWindows.filter(w => {
+                    const workArea = workspace.get_work_area_for_monitor(monitor);
+                    const snapState = snap.detectSnap(w, workArea);
+                    return snapState.snapped && w.get_id() !== window.get_id();
+                });
+                
+                if (snappedWindows.length === 1 && workspaceWindows.length === 2) {
+                    // Try to tile with the snapped window
+                    console.log(`[MOSAIC WM] New window: Attempting to tile with snapped window`);
+                    const tileSuccess = windowing.tryTileWithSnappedWindow(window, snappedWindows[0], null);
+                    
+                    if (tileSuccess) {
+                        console.log('[MOSAIC WM] New window: Successfully tiled with snapped window');
+                        this._connectWindowWorkspaceSignal(window);
+                        return; // Done - don't do overflow check
+                    }
+                    console.log('[MOSAIC WM] New window: Tiling failed, continuing with normal flow');
+                }
+                
+                // CASE 3: Check if window FITS in current workspace
                 // Uses canFitWindow() which checks:
                 // - If workspace has maximized window (= occupied)
                 // - If adding would cause overflow
@@ -280,6 +314,38 @@ export default class WindowMosaicExtension extends Extension {
                 }
             }
             
+            // Check if target workspace has exactly one snapped window
+            const workspaceWindows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
+            console.log(`[MOSAIC WM] Manual move: workspace has ${workspaceWindows.length} windows`);
+            
+            const snappedWindows = workspaceWindows.filter(w => {
+                const workArea = workspace.get_work_area_for_monitor(monitor);
+                const snapState = snap.detectSnap(w, workArea);
+                const isSnapped = snapState.snapped && w.get_id() !== window.get_id();
+                console.log(`[MOSAIC WM] Manual move: window ${w.get_id()} snapped=${snapState.snapped}, isTarget=${w.get_id() === window.get_id()}, willInclude=${isSnapped}`);
+                return isSnapped;
+            });
+            
+            console.log(`[MOSAIC WM] Manual move: found ${snappedWindows.length} snapped windows, total ${workspaceWindows.length} windows`);
+            
+            if (snappedWindows.length === 1 && workspaceWindows.length === 2) {
+                // Try to tile with the snapped window
+                console.log(`[MOSAIC WM] Manual move: Attempting to tile with snapped window`);
+                const previousWorkspace = previousWorkspaceIndex !== undefined ? 
+                    global.workspace_manager.get_workspace_by_index(previousWorkspaceIndex) : null;
+                const tileSuccess = windowing.tryTileWithSnappedWindow(window, snappedWindows[0], previousWorkspace);
+                
+                if (tileSuccess) {
+                    console.log('[MOSAIC WM] Manual move: Successfully tiled with snapped window');
+                    return; // Don't do overflow check
+                }
+                // If tiling failed, window was already returned to previous workspace
+                if (previousWorkspace && window.get_workspace() === previousWorkspace) {
+                    console.log('[MOSAIC WM] Manual move: Tiling failed, window returned to previous workspace');
+                    return;
+                }
+            }
+            
             // Check if window fits in new workspace
             const canFit = tiling.canFitWindow(window, workspace, monitor);
             
@@ -371,6 +437,12 @@ export default class WindowMosaicExtension extends Extension {
     _sizeChangedHandler = (_, win) => {
         let window = win.meta_window;
         if(!this._sizeChanged && !windowing.isExcluded(window)) {
+            // Skip tiling if this window is being restored from edge tiling
+            if (this._skipNextTiling === window.get_id()) {
+                console.log(`[MOSAIC WM] Skipping size change tiling for window ${window.get_id()} (restoring from edge tiling)`);
+                return;
+            }
+
             // Live resizing
             this._sizeChanged = true;
             
@@ -413,10 +485,91 @@ export default class WindowMosaicExtension extends Extension {
      * @param {number} grabpo - The grab operation type
      */
     _grabOpBeginHandler = (_, window, grabpo) => {
+        // Edge tiling: start polling cursor position
+        if (grabpo === 1 && !windowing.isExcluded(window)) {
+            console.log(`[MOSAIC WM] Edge tiling: grab begin`);
+            this._draggedWindow = window;
+            this._currentZone = edgeTiling.TileZone.NONE;
+            
+            // Check if window is currently edge-tiled and restore it immediately
+            const windowState = edgeTiling.getWindowState(window);
+            console.log(`[MOSAIC WM] _grabOpBeginHandler: windowState=${JSON.stringify(windowState)}`);
+            if (windowState && windowState.zone !== edgeTiling.TileZone.NONE) {
+                console.log(`[MOSAIC WM] Edge tiling: window was in zone ${windowState.zone}, restoring immediately`);
+                
+                // Prevent mosaic tiling during restoration
+                this._skipNextTiling = window.get_id();
+                
+                // Restore the window and call startDrag only after restoration completes
+                edgeTiling.removeTile(window, () => {
+                    console.log(`[MOSAIC WM] Edge tiling: restoration complete, now calling startDrag`);
+                    
+                    // Clear skip flag after restoration
+                    this._skipNextTiling = null;
+                    
+                    // Start mosaic drag for non-excluded, non-maximized windows
+                    if( !windowing.isExcluded(window) &&
+                        (grabpo === 1 || grabpo === 1025) && // When a window has moved
+                        !(windowing.isMaximizedOrFullscreen(window))) {
+                        console.log(`[MOSAIC WM] _grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
+                        reordering.startDrag(window);
+                        console.log(`[MOSAIC WM] _grabOpBeginHandler: startDrag completed`);
+                    }
+                });
+                
+                // Return early - startDrag will be called by the callback
+                return;
+            }
+            
+            // Poll cursor position to detect edge tiling zones
+            this._edgeTilingPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                if (!this._draggedWindow) {
+                    return GLib.SOURCE_REMOVE;
+                }
+                
+                const [x, y] = global.get_pointer();
+                const monitor = this._draggedWindow.get_monitor();
+                const workspace = this._draggedWindow.get_workspace();
+                const workArea = workspace.get_work_area_for_monitor(monitor);
+                
+                const zone = edgeTiling.detectZone(x, y, workArea, workspace);
+                const windowState = edgeTiling.getWindowState(this._draggedWindow);
+                const wasInEdgeTiling = windowState && windowState.zone !== edgeTiling.TileZone.NONE;
+                
+                console.log(`[MOSAIC WM] Edge tiling poll: zone=${zone}, windowState=${JSON.stringify(windowState)}, wasInEdgeTiling=${wasInEdgeTiling}`);
+                
+                if (zone !== edgeTiling.TileZone.NONE && zone !== this._currentZone) {
+                    // Entering a new edge tiling zone
+                    console.log(`[MOSAIC WM] Edge tiling: detected zone ${zone}`);
+                    this._currentZone = zone;
+                    edgeTiling.setEdgeTilingActive(true, this._draggedWindow);
+                    drawing.showTilePreview(zone, workArea);
+                } else if (zone === edgeTiling.TileZone.NONE && this._currentZone !== edgeTiling.TileZone.NONE) {
+                    // Exiting edge tiling zone
+                    console.log(`[MOSAIC WM] Edge tiling: exiting zone, wasInEdgeTiling=${wasInEdgeTiling}`);
+                    this._currentZone = edgeTiling.TileZone.NONE;
+                    edgeTiling.setEdgeTilingActive(false, null);
+                    drawing.hideTilePreview();
+                    
+                    // If window was previously in edge tiling, restore it now
+                    if (wasInEdgeTiling) {
+                        console.log(`[MOSAIC WM] Edge tiling: restoring window from tiled state`);
+                        edgeTiling.removeTile(this._draggedWindow);
+                    }
+                }
+                
+                return GLib.SOURCE_CONTINUE;
+            });
+        }
+        
+        // Start mosaic drag for non-excluded, non-maximized windows
         if( !windowing.isExcluded(window) &&
             (grabpo === 1 || grabpo === 1025) && // When a window has moved
-            !(windowing.isMaximizedOrFullscreen(window)))
+            !(windowing.isMaximizedOrFullscreen(window))) {
+            console.log(`[MOSAIC WM] _grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
             reordering.startDrag(window);
+            console.log(`[MOSAIC WM] _grabOpBeginHandler: startDrag completed`);
+        }
         // tileWindowWorkspace(window);
     }
     
@@ -429,14 +582,62 @@ export default class WindowMosaicExtension extends Extension {
      * @param {number} grabpo - The grab operation type
      */
     _grabOpEndHandler = (_, window, grabpo) => {
+        // Edge tiling: stop polling and apply tile if in zone
+        if (grabpo === 1 && window === this._draggedWindow) {
+            // Stop polling
+            if (this._edgeTilingPollId) {
+                GLib.source_remove(this._edgeTilingPollId);
+                this._edgeTilingPollId = null;
+            }
+            
+            if (this._currentZone !== edgeTiling.TileZone.NONE) {
+                console.log(`[MOSAIC WM] Edge tiling: applying zone ${this._currentZone}`);
+                const workspace = window.get_workspace();
+                const monitor = window.get_monitor();
+                const workArea = workspace.get_work_area_for_monitor(monitor);
+                
+                // Set skip flag BEFORE applying tile to prevent signal handlers (like size-change)
+                // from triggering a mosaic retile during the operation
+                this._skipNextTiling = window.get_id();
+                
+                const success = edgeTiling.applyTile(window, this._currentZone, workArea);
+                console.log(`[MOSAIC WM] Edge tiling: apply result = ${success}`);
+                
+                // Prevent mosaic from re-tiling this window immediately after edge tiling
+                if (success) {
+                    // Short timeout to prevent immediate re-tiling
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                        this._skipNextTiling = null;
+                        return GLib.SOURCE_REMOVE;
+                    });
+                } else {
+                    // Failed, clear flag immediately
+                    this._skipNextTiling = null;
+                }
+            } 
+            // Note: Window restoration from edge tiling now happens during drag
+            // in the polling loop, not here on release
+            
+            
+            drawing.hideTilePreview();
+            this._draggedWindow = null;
+            this._currentZone = edgeTiling.TileZone.NONE;
+            
+            // Clear edge tiling active state
+            edgeTiling.setEdgeTilingActive(false, null);
+        }
+        
         if(!windowing.isExcluded(window)) {
-            reordering.stopDrag(window);
+            // Pass skip_tiling=true if we just applied edge tiling
+            const skipTiling = this._skipNextTiling === window.get_id();
+            reordering.stopDrag(window, false, skipTiling);
             
             // Log grab operation for debugging
             console.log(`[MOSAIC WM] Grab operation ended: ${grabpo}`);
             
             if( (grabpo === 1 || grabpo === 1025) && // When a window has moved
-                !(windowing.isMaximizedOrFullscreen(window)))
+                !(windowing.isMaximizedOrFullscreen(window)) &&
+                !skipTiling) // Skip if edge tiling was just applied
             {
                 tiling.tileWorkspaceWindows(window.get_workspace(), window, window.get_monitor(), false);
             }
@@ -456,6 +657,33 @@ export default class WindowMosaicExtension extends Extension {
             }
         } else
             reordering.stopDrag(window, true);
+    }
+
+    _sizeChangeHandler = (_, window, mode) => {
+        let workspace = window.get_workspace();
+        let monitor = window.get_monitor();
+
+        if (!windowing.isExcluded(window)) {
+            if (mode === 0 || mode === 2) { // Maximize
+                const workspaceWindows = windowing.getMonitorWorkspaceWindows(workspace, monitor);
+                if (workspaceWindows.length > 1) {
+                    console.log('[MOSAIC WM] Window maximized - moving to new workspace');
+                    let newWorkspace = windowing.moveOversizedWindow(window);
+                    if (newWorkspace) {
+                        tiling.tileWorkspaceWindows(workspace, false, monitor, false);
+                    }
+                }
+            } else if (mode === 1 || mode === 3) { // Unmaximize
+                // Skip tiling if this window is being restored from edge tiling
+                if (this._skipNextTiling === window.get_id()) {
+                    console.log(`[MOSAIC WM] Skipping tiling for unmaximized window ${window.get_id()} (restoring from edge tiling)`);
+                    return;
+                }
+                
+                console.log('[MOSAIC WM] Window unmaximized - tiling workspace');
+                tiling.tileWorkspaceWindows(workspace, window, monitor, false);
+            }
+        }
     }
 
     /**
@@ -600,12 +828,33 @@ export default class WindowMosaicExtension extends Extension {
     enable() {
         console.log("[MOSAIC WM]: Starting Mosaic layout manager.");
         
+        // Disable native edge tiling and conflicting keybindings
+        this._settingsOverrider = new SettingsOverrider();
+        
+        this._settingsOverrider.add(
+            new Gio.Settings({ schema_id: 'org.gnome.mutter' }),
+            'edge-tiling',
+            new GLib.Variant('b', false)
+        );
+        
+        const mutterKeybindings = new Gio.Settings({ schema_id: 'org.gnome.mutter.keybindings' });
+        const emptyArray = new GLib.Variant('as', []);
+        
+        if (mutterKeybindings.get_strv('toggle-tiled-left').includes('<Super>Left')) {
+            this._settingsOverrider.add(mutterKeybindings, 'toggle-tiled-left', emptyArray);
+        }
+        if (mutterKeybindings.get_strv('toggle-tiled-right').includes('<Super>Right')) {
+            this._settingsOverrider.add(mutterKeybindings, 'toggle-tiled-right', emptyArray);
+        }
+        
         this._wmEventIds.push(global.window_manager.connect('size-change', this._sizeChangeHandler));
         this._wmEventIds.push(global.window_manager.connect('size-changed', this._sizeChangedHandler));
         this._displayEventIds.push(global.display.connect('window-created', this._windowCreatedHandler));
         this._wmEventIds.push(global.window_manager.connect('destroy', this._destroyedHandler));
         this._displayEventIds.push(global.display.connect("grab-op-begin", this._grabOpBeginHandler));
         this._displayEventIds.push(global.display.connect("grab-op-end", this._grabOpEndHandler));
+        
+        // Edge tiling is now integrated into _grabOpBeginHandler and _grabOpEndHandler
         
         // Connect workspace-added listener to attach listeners to new workspaces
         this._workspaceManEventIds.push(global.workspace_manager.connect("workspace-added", this._workspaceAddSignal));
@@ -627,6 +876,23 @@ export default class WindowMosaicExtension extends Extension {
 
     disable() {
         console.log("[MOSAIC WM]: Disabling Mosaic layout manager.");
+        
+        // Restore native settings
+        if (this._settingsOverrider) {
+            this._settingsOverrider.destroy();
+            this._settingsOverrider = null;
+        }
+        
+        // Cleanup edge tiling polling timer if active
+        if (this._edgeTilingPollId) {
+            GLib.source_remove(this._edgeTilingPollId);
+            this._edgeTilingPollId = null;
+        }
+        
+        // Clear edge tiling states
+        edgeTiling.clearAllStates();
+        drawing.hideTilePreview();
+        
         // Disconnect all events
         clearTimeout(this._tileTimeout);
         for(let eventId of this._wmEventIds)

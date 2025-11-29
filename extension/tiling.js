@@ -670,16 +670,23 @@ function calculateMinimumWindowSize(availableSpace, windowCount) {
 export function canFitWindow(window, workspace, monitor) {
     console.log(`[MOSAIC WM] canFitWindow: Checking if window can fit in workspace ${workspace.index()}`);
     
+    // CRITICAL: Fullscreen windows always "fit" - they don't participate in tiling
+    // This prevents infinite workspace creation loop for fullscreen games/apps
+    if (window.is_fullscreen()) {
+        console.log('[MOSAIC WM] canFitWindow: Window is fullscreen - always fits (no overflow)');
+        return true;
+    }
+    
     // Get workspace information
-    let working_info = getWorkingInfo(workspace, window, monitor);
-    if(!working_info) {
+    const working_info = getWorkingInfo(workspace, window, monitor);
+    if (!working_info) {
         console.log('[MOSAIC WM] canFitWindow: No working info - cannot fit');
         return false;
     }
 
     // RULE 1: Workspace with maximized window = completely occupied
     // Cannot receive new apps
-    for(let existing_window of working_info.meta_windows) {
+    for (const existing_window of working_info.meta_windows) {
         if(windowing.isMaximizedOrFullscreen(existing_window)) {
             console.log('[MOSAIC WM] canFitWindow: Workspace has maximized window - cannot fit');
             return false; // Workspace occupied by maximized window

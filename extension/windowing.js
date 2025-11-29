@@ -8,6 +8,7 @@
  * - Window filtering and exclusion logic
  */
 
+import Meta from 'gi://Meta';
 import * as tiling from './tiling.js';
 import * as snap from './snap.js';
 
@@ -157,30 +158,38 @@ export function tryTileWithSnappedWindow(window, snappedWindow, previousWorkspac
         return false;
     }
     
-    // Determine opposite tile mode
-    let tileMode;
+    // Determine opposite side for tiling
+    let direction;
     if (snapState.zone === 'left') {
-        tileMode = Meta.TileMode.RIGHT;
+        direction = 'right';
     } else if (snapState.zone === 'right') {
-        tileMode = Meta.TileMode.LEFT;
+        direction = 'left';
     } else {
         console.log('[MOSAIC WM] Unsupported snap zone for tiling');
         return false;
     }
     
-    // Check if window can be tiled
-    if (!window.can_tile()) {
-        console.log(`[MOSAIC WM] Window ${window.get_wm_class()} cannot be tiled - returning to previous workspace`);
-        if (previousWorkspace) {
-            window.change_workspace(previousWorkspace);
-        }
-        return false;
+    // Calculate available tile space (half screen)
+    const halfWidth = Math.floor(workArea.width / 2);
+    let targetX, targetY, targetWidth, targetHeight;
+    
+    if (direction === 'left') {
+        targetX = workArea.x;
+        targetY = workArea.y;
+        targetWidth = halfWidth;
+        targetHeight = workArea.height;
+    } else { // right
+        targetX = workArea.x + halfWidth;
+        targetY = workArea.y;
+        targetWidth = workArea.width - halfWidth;
+        targetHeight = workArea.height;
     }
     
-    // Attempt to tile the window
+    // Tile the window by positioning it
     try {
-        window.tile(tileMode);
-        console.log(`[MOSAIC WM] Successfully tiled window ${window.get_wm_class()} in ${tileMode === Meta.TileMode.LEFT ? 'LEFT' : 'RIGHT'} mode`);
+        window.unmaximize();
+        window.move_resize_frame(false, targetX, targetY, targetWidth, targetHeight);
+        console.log(`[MOSAIC WM] Successfully tiled window ${window.get_wm_class()} to ${direction} (${targetWidth}x${targetHeight})`);
         return true;
     } catch (error) {
         console.log(`[MOSAIC WM] Failed to tile window: ${error.message}`);

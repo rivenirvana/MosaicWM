@@ -151,8 +151,9 @@ export function startDrag(meta_window) {
  * 
  * @param {Meta.Window} meta_window - The window that was being dragged
  * @param {boolean} skip_apply - If true, don't apply the swap (cancel the drag)
+ * @param {boolean} skip_tiling - If true, don't re-tile the workspace (used when edge tiling is applied)
  */
-export function stopDrag(meta_window, skip_apply) {
+export function stopDrag(meta_window, skip_apply, skip_tiling) {
     let workspace = meta_window.get_workspace();
     dragStart = false;
     clearTimeout(dragTimeout);
@@ -164,5 +165,10 @@ export function stopDrag(meta_window, skip_apply) {
     if(!skip_apply)
         tiling.applyTmpSwap(workspace); // Make the swap permanent
     tiling.clearTmpSwap();
-    tiling.tileWorkspaceWindows(workspace, null, meta_window.get_monitor());
+    
+    if (!skip_tiling) {
+        tiling.tileWorkspaceWindows(workspace, null, meta_window.get_monitor());
+    } else {
+        console.log(`[MOSAIC WM] stopDrag: Skipping workspace tiling (requested)`);
+    }
 }

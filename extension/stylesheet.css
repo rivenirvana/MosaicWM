@@ -1,6 +1,13 @@
-.feedforward {
-  background-color: st-transparentize(-st-accent-color, 0.8);
-  border: 1px solid st-transparentize(-st-accent-color, 0.2);
-  border-radius: 12px;
-  z-index: -1;
+.tile-preview {
+    background-color: st-transparentize(-st-accent-color, 0.8);
+    border: 2px solid st-transparentize(-st-accent-color, 0.2);
+    border-radius: 0px;
+    z-index: -1;
+}
+
+.mosaic-preview {
+    background-color: st-transparentize(-st-accent-color, 0.8);
+    border: 2px solid st-transparentize(-st-accent-color, 0.2);
+    border-radius: 12px;
+    z-index: -1;
 }
