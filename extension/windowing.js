@@ -8,9 +8,10 @@
  * - Window filtering and exclusion logic
  */
 
+
 import Meta from 'gi://Meta';
-import * as tiling from './tiling.js';
 import * as edgeTiling from './edgeTiling.js';
+import * as tiling from './tiling.js';
 
 /**
  * Gets the current timestamp from GNOME Shell.
@@ -221,11 +222,20 @@ export function tryTileWithSnappedWindow(window, edgeTiledWindow, previousWorksp
 
 export function moveOversizedWindow(window) {
     let previous_workspace = window.get_workspace();
-    let new_workspace = global.workspace_manager.append_new_workspace(false, getTimestamp());
     let monitor = window.get_monitor();
+    let new_workspace = global.workspace_manager.append_new_workspace(false, getTimestamp());
 
+    console.log(`[MOSAIC WM] Moving overflow window ${window.get_id()} from workspace ${previous_workspace.index()} to ${new_workspace.index()}`);
+
+    // Move window to new workspace
     window.change_workspace(new_workspace);
     global.workspace_manager.reorder_workspace(new_workspace, previous_workspace.index() + 1);
+
+    // RE-TILE PREVIOUS WORKSPACE
+    // This fixes the bug where the previous workspace layout was left broken
+    // after removing the overflow window
+    console.log(`[MOSAIC WM] Re-tiling previous workspace ${previous_workspace.index()} after overflow`);
+    tiling.tileWorkspaceWindows(previous_workspace, null, monitor, false);
 
     let switchFocusToMovedWindow = previous_workspace.active;
     if (switchFocusToMovedWindow) {
