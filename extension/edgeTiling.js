@@ -481,6 +481,10 @@ export function applyTile(window, zone, workArea) {
         }
         
         console.log(`[MOSAIC WM] Applied edge tile zone ${zone} to window ${winId}`);
+        
+        // Check for mosaic overflow after tiling
+        handleMosaicOverflow(window, zone);
+        
         return GLib.SOURCE_REMOVE;
     });
     
@@ -555,6 +559,114 @@ export function removeTile(window, callback = null) {
     }
     
     console.log(`[MOSAIC WM] Removed edge tile from window ${window.get_id()}, restored to ${savedWidth}x${savedHeight}`);
+}
+
+/**
+ * Handle mosaic overflow after edge tiling is applied
+ * @param {Meta.Window} tiledWindow - Window that was just edge-tiled
+ * @param {number} zone - Zone that was applied
+ */
+function handleMosaicOverflow(tiledWindow, zone) {
+    // Only handle for full-width tiles (not quarters or fullscreen)
+    if (zone !== TileZone.LEFT_FULL && zone !== TileZone.RIGHT_FULL) {
+        return;
+    }
+    
+    const workspace = tiledWindow.get_workspace();
+    const monitor = tiledWindow.get_monitor();
+    const workArea = workspace.get_work_area_for_monitor(monitor);
+    
+    // Get remaining space after edge tiling
+    const remainingSpace = calculateRemainingSpace(workspace, monitor);
+    
+    // Get non-edge-tiled windows (mosaic windows)
+    const mosaicWindows = getNonEdgeTiledWindows(workspace, monitor);
+    
+    if (mosaicWindows.length === 0) {
+        console.log('[MOSAIC WM] No mosaic windows - no overflow check needed');
+        return;
+    }
+    
+    console.log(`[MOSAIC WM] Checking mosaic overflow: ${mosaicWindows.length} mosaic windows, remaining space: ${remainingSpace.width}x${remainingSpace.height}`);
+    
+    // CASE 2: Single large window → auto-tile to opposite side
+    if (mosaicWindows.length === 1) {
+        const mosaicWindow = mosaicWindows[0];
+        const frame = mosaicWindow.get_frame_rect();
+        
+        // Check if window is large enough to auto-tile (≥80% of remaining space)
+        const widthThreshold = remainingSpace.width * 0.8;
+        
+        if (frame.width >= widthThreshold) {
+            console.log(`[MOSAIC WM] Single large window (${frame.width}px ≥ ${widthThreshold}px) - auto-tiling to opposite side`);
+            
+            // Determine opposite zone
+            const oppositeZone = (zone === TileZone.LEFT_FULL) 
+                ? TileZone.RIGHT_FULL 
+                : TileZone.LEFT_FULL;
+            
+            // Auto-tile the window (use timeout to avoid recursion)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                applyTile(mosaicWindow, oppositeZone, workArea);
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+    }
+    
+    // CASE 1: Check if mosaic windows fit in remaining space
+    // Create test descriptors for mosaic windows
+    const testWindows = mosaicWindows.map((w, index) => {
+        const frame = w.get_frame_rect();
+        return {
+            id: w.get_id(),
+            x: frame.x,
+            y: frame.y,
+            width: frame.width,
+            height: frame.height,
+            index: index
+        };
+    });
+    
+    // Use tiling algorithm to check if they fit
+    // Note: We need to access the tile function directly
+    // Since tiling is imported at module level, we can't call it here
+    // Instead, use a simpler heuristic: check total area
+    let totalMosaicArea = 0;
+    for (const w of mosaicWindows) {
+        const frame = w.get_frame_rect();
+        totalMosaicArea += frame.width * frame.height;
+    }
+    
+    const remainingArea = remainingSpace.width * remainingSpace.height;
+    const areaThreshold = remainingArea * 0.7; // 70% threshold
+    
+    if (totalMosaicArea > areaThreshold) {
+        console.log(`[MOSAIC WM] Mosaic windows don't fit (${totalMosaicArea}px² > ${areaThreshold}px²) - moving all to SAME new workspace`);
+        
+        // Create ONE new workspace for all mosaic windows
+        import('./windowing.js').then(windowing => {
+            const workspaceManager = global.workspace_manager;
+            const currentIndex = workspace.index();
+            const nWorkspaces = workspaceManager.get_n_workspaces();
+            
+            // Create new workspace after current one
+            const newWorkspace = workspaceManager.append_new_workspace(false, global.get_current_time());
+            
+            console.log(`[MOSAIC WM] Created new workspace ${newWorkspace.index()} for ${mosaicWindows.length} mosaic windows`);
+            
+            // Move ALL mosaic windows to the same new workspace
+            for (const mosaicWindow of mosaicWindows) {
+                mosaicWindow.change_workspace(newWorkspace);
+                console.log(`[MOSAIC WM] Moved window ${mosaicWindow.get_id()} to workspace ${newWorkspace.index()}`);
+            }
+            
+            // Activate the new workspace to follow the windows
+            newWorkspace.activate(global.get_current_time());
+        });
+    } else {
+        console.log('[MOSAIC WM] Mosaic windows fit in remaining space - no overflow');
+    }
 }
 
 /**
