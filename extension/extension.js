@@ -1086,10 +1086,16 @@ export default class WindowMosaicExtension extends Extension {
         drawing.clearActors();
 
         // Cleanup workspace-changed signals
+        // Iterate through all windows to find and disconnect signals
+        const allWindows = global.display.get_tab_list(Meta.TabList.NORMAL, null);
         this._windowWorkspaceSignals.forEach((signalId, windowId) => {
-            const window = global.display.get_window_by_id(windowId);
+            const window = allWindows.find(w => w.get_id() === windowId);
             if (window) {
-                window.disconnect(signalId);
+                try {
+                    window.disconnect(signalId);
+                } catch (e) {
+                    // Window might already be destroyed
+                }
             }
         });
         this._windowWorkspaceSignals.clear();
