@@ -32,6 +32,10 @@ const _resizeListeners = new Map(); // windowId -> signalId
 let _isResizing = false; // Flag to prevent recursive resize
 const _previousSizes = new Map(); // windowId -> { width, height } for delta tracking
 
+// Module state for auto-tiling dependencies
+// Maps: dependentWindowId -> masterWindowId
+const _autoTiledDependencies = new Map();
+
 /**
  * Check if edge tiling is currently active (during drag)
  * @returns {boolean}
@@ -543,7 +547,34 @@ export function clearWindowState(window) {
         }
     }
     
+    // Clean up auto-tile dependencies
+    _autoTiledDependencies.forEach((masterId, dependentId) => {
+        if (masterId === winId || dependentId === winId) {
+            _autoTiledDependencies.delete(dependentId);
+        }
+    });
+    
     _windowStates.delete(winId);
+}
+
+/**
+ * Find window by ID across all workspaces
+ * @param {number} windowId - Window ID to find
+ * @returns {Meta.Window|null}
+ */
+function findWindowById(windowId) {
+    const allWindows = global.display.get_tab_list(Meta.TabList.NORMAL, null);
+    return allWindows.find(w => w.get_id() === windowId) || null;
+}
+
+/**
+ * Register an auto-tile dependency (for external use, e.g., dual-tiling)
+ * @param {number} dependentId - ID of the dependent window
+ * @param {number} masterId - ID of the master window
+ */
+export function registerAutoTileDependency(dependentId, masterId) {
+    _autoTiledDependencies.set(dependentId, masterId);
+    console.log(`[MOSAIC WM] Registered auto-tile dependency: ${dependentId} depends on ${masterId}`);
 }
 
 /**
@@ -641,11 +672,20 @@ function canResize(window, targetWidth, targetHeight) {
  * @param {Meta.Window} window
  * @param {number} zone - TileZone enum value
  * @param {Object} workArea - Work area rectangle
+ * @param {boolean} skipOverflowCheck - If true, skip mosaic overflow check (for swaps)
  * @returns {boolean} Success
  */
-export function applyTile(window, zone, workArea) {
+export function applyTile(window, zone, workArea, skipOverflowCheck = false) {
     // Save current window state before tiling
     saveWindowState(window);
+    
+    const winId = window.get_id();
+    
+    // If this window is a dependent, manual retiling breaks the dependency
+    if (_autoTiledDependencies.has(winId)) {
+        console.log(`[MOSAIC WM] Manual retile breaks auto-tile dependency for ${winId}`);
+        _autoTiledDependencies.delete(winId);
+    }
     
     // Special case: fullscreen
     if (zone === TileZone.FULLSCREEN) {
@@ -723,9 +763,6 @@ export function applyTile(window, zone, workArea) {
         savedFullTileWidth = fullFrame.width;
         console.log(`[MOSAIC WM] Converting FULL tile ${fullToQuarterConversion.window.get_id()} to quarter zone ${fullToQuarterConversion.newZone}, preserving width=${savedFullTileWidth}px`);
     }
-    
-    // Capture winId before callback
-    const winId = window.get_id();
     
     // Unmaximize first (no arguments needed)
     window.unmaximize();
@@ -822,8 +859,10 @@ export function applyTile(window, zone, workArea) {
             console.log(`[MOSAIC WM] Converted to ${convertedRect.width}x${convertedRect.height}, new quarter: ${rect.width}x${rect.height}`);
         }
         
-        // Check for mosaic overflow after tiling
-        handleMosaicOverflow(window, zone);
+        // Check for mosaic overflow after tiling (unless explicitly skipped for swaps)
+        if (!skipOverflowCheck) {
+            handleMosaicOverflow(window, zone);
+        }
         
         return GLib.SOURCE_REMOVE;
     });
@@ -861,6 +900,22 @@ export function removeTile(window, callback = null) {
     const savedY = savedState.y;
     
     console.log(`[MOSAIC WM] removeTile: Saved dimensions: ${savedWidth}x${savedHeight} at (${savedX}, ${savedY})`);
+    
+    // Check if this window has auto-tiled dependents
+    _autoTiledDependencies.forEach((masterId, dependentId) => {
+        if (masterId === winId) {
+            console.log(`[MOSAIC WM] Master window ${winId} exiting - removing dependent ${dependentId}`);
+            
+            const dependent = findWindowById(dependentId);
+            if (dependent) {
+                // Remove dependent from tiling (will return to mosaic)
+                removeTile(dependent);
+            }
+            
+            // Clean up dependency
+            _autoTiledDependencies.delete(dependentId);
+        }
+    });
     
     // If this was a quarter tile, expand the adjacent quarter to FULL
     if (isQuarterZone(savedState.zone)) {
@@ -985,6 +1040,13 @@ function handleMosaicOverflow(tiledWindow, zone) {
             // Auto-tile the window (use timeout to avoid recursion)
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                 applyTile(mosaicWindow, oppositeZone, workArea);
+                
+                // Track this as an auto-tiled dependency
+                const dependentId = mosaicWindow.get_id();
+                const masterId = tiledWindow.get_id();
+                _autoTiledDependencies.set(dependentId, masterId);
+                console.log(`[MOSAIC WM] Tracked auto-tile dependency: ${dependentId} depends on ${masterId}`);
+                
                 return GLib.SOURCE_REMOVE;
             });
             return;
