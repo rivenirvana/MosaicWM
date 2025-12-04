@@ -632,7 +632,10 @@ export function canFitWindow(window, workspace, monitor) {
     
     if (edgeTiledWindows.length > 0) {
         // Check if workspace is fully occupied by edge tiles (e.g., left + right)
-        const zones = edgeTiledWindows.map(w => w.zone);
+        // IMPORTANT: Exclude the window being tested from this check
+        // If the window IS one of the edge tiles, it shouldn't count against itself
+        const otherEdgeTiles = edgeTiledWindows.filter(w => w.window.get_id() !== window.get_id());
+        const zones = otherEdgeTiles.map(w => w.zone);
         const hasLeftFull = zones.includes(edgeTiling.TileZone.LEFT_FULL);
         const hasRightFull = zones.includes(edgeTiling.TileZone.RIGHT_FULL);
         const hasLeftQuarters = zones.some(z => z === edgeTiling.TileZone.TOP_LEFT || z === edgeTiling.TileZone.BOTTOM_LEFT);
