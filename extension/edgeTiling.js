@@ -1120,6 +1120,16 @@ function handleMosaicOverflow(tiledWindow, zone) {
                 console.log(`[MOSAIC WM] Moved window ${mosaicWindow.get_id()} to workspace ${newWorkspace.index()}`);
             }
             
+            // Re-tile source workspace after moving windows
+            // This ensures remaining windows (if any) adjust their layout
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                import('./tiling.js').then(tilingModule => {
+                    tilingModule.tileWorkspaceWindows(workspace, null, monitor);
+                    console.log(`[MOSAIC WM] Re-tiled source workspace ${workspace.index()} after overflow move`);
+                });
+                return GLib.SOURCE_REMOVE;
+            });
+            
             // Activate the new workspace to follow the windows
             newWorkspace.activate(global.get_current_time());
         });

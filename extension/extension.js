@@ -354,13 +354,19 @@ export default class WindowMosaicExtension extends Extension {
             const monitor = window.get_monitor();
             
             // Re-tile source workspace (where window came from)
-            if (this._lastWorkspaceIndex !== undefined && this._lastWorkspaceIndex !== currentWorkspaceIndex) {
-                const sourceWorkspace = global.workspace_manager.get_workspace_by_index(this._lastWorkspaceIndex);
+            // Use per-window tracking instead of global _lastWorkspaceIndex
+            const previousWorkspaceIndex = this._windowPreviousWorkspace.get(windowId);
+            
+            if (previousWorkspaceIndex !== undefined && previousWorkspaceIndex !== currentWorkspaceIndex) {
+                const sourceWorkspace = global.workspace_manager.get_workspace_by_index(previousWorkspaceIndex);
                 if (sourceWorkspace) {
-                    console.log(`[MOSAIC WM] Re-tiling source workspace ${this._lastWorkspaceIndex} after window move`);
+                    console.log(`[MOSAIC WM] Re-tiling source workspace ${previousWorkspaceIndex} after window ${windowId} moved to ${currentWorkspaceIndex}`);
                     tiling.tileWorkspaceWindows(sourceWorkspace, false, monitor, false);
                 }
             }
+            
+            // Update previous workspace tracker for this window
+            this._windowPreviousWorkspace.set(windowId, currentWorkspaceIndex);
             
             // Check if window fits in new workspace
             const workspaceWindows = windowing.getMonitorWorkspaceWindows(currentWorkspace, monitor);
@@ -432,10 +438,19 @@ export default class WindowMosaicExtension extends Extension {
      * @param {Meta.Window} window - The window to track
      */
     _connectWindowWorkspaceSignal(window) {
+        const windowId = window.get_id();
         const signalId = window.connect('workspace-changed', () => {
             this._windowWorkspaceChangedHandler(window);
         });
-        this._windowWorkspaceSignals.set(window.get_id(), signalId);
+        this._windowWorkspaceSignals.set(windowId, signalId);
+        
+        // Initialize previous workspace tracker when connecting signal
+        // This ensures it's always set before workspace-changed can fire
+        const currentWorkspace = window.get_workspace();
+        if (currentWorkspace) {
+            this._windowPreviousWorkspace.set(windowId, currentWorkspace.index());
+            console.log(`[MOSAIC WM] Initialized workspace tracker for window ${windowId} at workspace ${currentWorkspace.index()}`);
+        }
     }
 
     /**
@@ -816,9 +831,16 @@ export default class WindowMosaicExtension extends Extension {
                                           !isManualMove;
                 
                 // Only check overflow for overview drag-drop operations
-                // Skip new windows (no previous workspace) to avoid infinite loops
-                if (hasValidDimensions && !windowing.isExcluded(WINDOW) && isOverviewDragDrop) {
+                // Check if this is overview drag-drop (window moved between workspaces)
+                if (previousWorkspaceIndex !== undefined && previousWorkspaceIndex !== WORKSPACE.index() && timeSinceRemoved < 100) {
                     console.log(`[MOSAIC WM] window-added: Overview drag-drop - window ${WINDOW.get_id()} from workspace ${previousWorkspaceIndex} to ${WORKSPACE.index()}`);
+                    
+                    // SIMPLE FIX: Re-tile the source workspace immediately
+                    const sourceWorkspace = this._workspaceManager.get_workspace_by_index(previousWorkspaceIndex);
+                    if (sourceWorkspace) {
+                        console.log(`[MOSAIC WM] Re-tiling source workspace ${previousWorkspaceIndex} after DnD`);
+                        tiling.tileWorkspaceWindows(sourceWorkspace, null, MONITOR, false);
+                    }
                     
                     // Check if target workspace has exactly one edge-tiled window
                     const workspaceWindows = windowing.getMonitorWorkspaceWindows(WORKSPACE, MONITOR);
@@ -970,6 +992,19 @@ export default class WindowMosaicExtension extends Extension {
             eventIds.push(workspace.connect("window-removed", this._windowRemoved));
             this._workspaceEventIds.push([workspace, eventIds]);
         }
+        
+        // Initialize workspace tracking for all existing windows
+        // This ensures windows that existed before extension was enabled are tracked
+        for(let i = 0; i < nWorkspaces; i++) {
+            let workspace = this._workspaceManager.get_workspace_by_index(i);
+            let windows = workspace.list_windows();
+            for (let window of windows) {
+                if (!windowing.isExcluded(window)) {
+                    this._connectWindowWorkspaceSignal(window);
+                }
+            }
+        }
+
 
         // Setup keyboard shortcuts
         this._setupKeybindings();
