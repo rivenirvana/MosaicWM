@@ -930,12 +930,15 @@ export default class WindowMosaicExtension extends Extension {
         this._windowRemovedTimestamp.set(window.get_id(), Date.now());
         
         let timeout = setInterval(() => {
-            const WORKSPACE = window.get_workspace();
+            // IMPORTANT: Use the workspace parameter (where window was removed FROM)
+            // NOT window.get_workspace() (where window moved TO)
+            const WORKSPACE = workspace;
             const WINDOW = window;
             const MONITOR = global.display.get_primary_monitor();
 
             if (tiling.checkValidity(MONITOR, WORKSPACE, WINDOW, false)) {
                 clearTimeout(timeout);
+                // Re-tile the workspace that lost the window
                 tiling.tileWorkspaceWindows(WORKSPACE, null, MONITOR, true);
             } else {
                 clearTimeout(timeout);
