@@ -15,6 +15,7 @@ import * as windowing from './windowing.js';
 import * as reordering from './reordering.js';
 import * as drawing from './drawing.js';
 import * as edgeTiling from './edgeTiling.js';
+import * as animations from './animations.js';
 
 // Module-level state for tiling operations
 var masks = []; // Visual feedback masks for windows being dragged
@@ -49,22 +50,22 @@ class WindowDescriptor{
     }
     
     /**
-     * Applies this descriptor's position to the actual window.
-     * Finds the window by ID instead of index to support filtered window lists.
-     * 
-     * @param {Meta.Window[]} meta_windows - Array of actual windows
-     * @param {number} x - New X position
-     * @param {number} y - New Y position
-     */
-    draw(meta_windows, x, y) {
-        // Find window by ID instead of index (supports filtered lists)
-        const window = meta_windows.find(w => w.get_id() === this.id);
-        if (window) {
-            window.move_frame(false, x, y);
-        } else {
-            console.warn(`[MOSAIC WM] Could not find window with ID ${this.id} for drawing`);
-        }
+ * Applies this descriptor's position to the actual window.
+ * Finds the window by ID instead of index to support filtered window lists.
+ * 
+ * @param {Meta.Window[]} meta_windows - Array of actual windows
+ * @param {number} x - New X position
+ * @param {number} y - New Y position
+ */
+draw(meta_windows, x, y) {
+    // Find window by ID instead of index (supports filtered lists)
+    const window = meta_windows.find(w => w.get_id() === this.id);
+    if (window) {
+        window.move_frame(false, x, y);
+    } else {
+        console.warn(`[MOSAIC WM] Could not find window with ID ${this.id} for drawing`);
     }
+}
 }
 
 /**
@@ -452,6 +453,7 @@ class Mask{
         this.height = window.height;
     }
     draw(_, x, y) {
+        console.log(`[MOSAIC WM] Mask.draw called: x=${x}, y=${y}, w=${this.width}, h=${this.height}`);
         drawing.removeBoxes();
         drawing.rect(x, y, this.width, this.height);
     }
@@ -487,6 +489,84 @@ export function enableDragMode(remainingSpace = null) {
 export function disableDragMode() {
     isDragging = false;
     dragRemainingSpace = null;
+}
+
+/**
+ * Animate windows to their new tiled positions
+ * Extracts final positions from tile_info and animates all windows
+ * @param {Object} tile_info - Tiling information with levels
+ * @param {Object} work_area - Work area for tiling
+ * @param {Meta.Window[]} meta_windows - Array of windows
+ * @param {Meta.Window|null} draggedWindow - Currently dragged window to exclude
+ */
+function animateTileLayout(tile_info, work_area, meta_windows, draggedWindow = null) {
+    console.log(`[MOSAIC WM] animateTileLayout called: ${meta_windows.length} windows, isDragging=${isDragging}`);
+    
+    const levels = tile_info.levels;
+    const _x = tile_info.x;
+    const _y = tile_info.y;
+    
+    const windowLayouts = [];
+    
+    if (!tile_info.vertical) {
+        // Horizontal tiling
+        let y = _y;
+        for (let level of levels) {
+            let x = level.x;
+            for (let windowDesc of level.windows) {
+                // Calculate vertical offset to center window in the level
+                let center_offset = (work_area.height / 2 + work_area.y) - (y + windowDesc.height / 2);
+                let y_offset = 0;
+                if (center_offset > 0)
+                    y_offset = Math.min(center_offset, level.height - windowDesc.height);
+                
+                const window = meta_windows.find(w => w.get_id() === windowDesc.id);
+                if (window) {
+                    windowLayouts.push({
+                        window: window,
+                        rect: {
+                            x: x,
+                            y: y + y_offset,
+                            width: windowDesc.width,
+                            height: windowDesc.height
+                        }
+                    });
+                }
+                x += windowDesc.width + constants.WINDOW_SPACING;
+            }
+            y += level.height + constants.WINDOW_SPACING;
+        }
+    } else {
+        // Vertical tiling
+        let x = _x;
+        for (let level of levels) {
+            let y = level.y;
+            for (let windowDesc of level.windows) {
+                const window = meta_windows.find(w => w.get_id() === windowDesc.id);
+                if (window) {
+                    windowLayouts.push({
+                        window: window,
+                        rect: {
+                            x: x,
+                            y: y,
+                            width: windowDesc.width,
+                            height: windowDesc.height
+                        }
+                    });
+                }
+                y += windowDesc.height + constants.WINDOW_SPACING;
+            }
+            x += level.width + constants.WINDOW_SPACING;
+        }
+    }
+    
+    // Animate all windows
+    console.log(`[MOSAIC WM] Calling animateReTiling with ${windowLayouts.length} windows`);
+    animations.animateReTiling(windowLayouts, draggedWindow);
+    
+    // Return true to indicate we handled the positioning (via animation)
+    // This prevents drawTile from immediately positioning windows
+    return true;
 }
 
 export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor, keep_oversized_windows) {
@@ -583,9 +663,34 @@ export function tileWorkspaceWindows(workspace, reference_meta_window, _monitor,
         tile_info = tile(_windows, tileArea);
     }
     
+    
     // Use the same area for drawing that was used for tiling
     console.log(`[MOSAIC WM] Drawing tiles - isDragging: ${isDragging}, has dragRemainingSpace: ${!!dragRemainingSpace}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
-    drawTile(tile_info, tileArea, meta_windows);
+    
+    // ANIMATIONS: Animate windows to new positions (skip if dragging)
+    let animationsHandledPositioning = false;
+    if (!isDragging && tile_info && tile_info.levels && tile_info.levels.length > 0) {
+        animationsHandledPositioning = animateTileLayout(tile_info, tileArea, meta_windows, reference_meta_window);
+    }
+    
+    // SPECIAL CASE: If dragging and no windows to tile, still draw the mask preview
+    if (isDragging && windows.length === 0 && reference_meta_window) {
+        const mask = getMask(reference_meta_window);
+        if (mask) {
+            console.log(`[MOSAIC WM] Drawing mask preview for dragged window (no other windows)`);
+            // Calculate where the dragged window would go (full remaining space)
+            const x = tileArea.x + tileArea.width / 2 - mask.width / 2;
+            const y = tileArea.y + tileArea.height / 2 - mask.height / 2;
+            mask.draw(null, x, y);
+        }
+    } else if (!animationsHandledPositioning) {
+        // Only call drawTile if animations didn't handle positioning
+        console.log(`[MOSAIC WM] Animations did not handle positioning, calling drawTile`);
+        drawTile(tile_info, tileArea, meta_windows);
+    } else {
+        console.log(`[MOSAIC WM] Animations handled positioning, skipping drawTile`);
+    }
+    
     return overflow;
 }
 

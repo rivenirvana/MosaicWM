@@ -1,6 +1,7 @@
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as tiling from './tiling.js';
+import * as animations from './animations.js';
 
 /**
  * Edge Tiling Zones
@@ -829,12 +830,8 @@ export function applyTile(window, zone, workArea, skipOverflowCheck = false) {
     
     // Apply tile using idle callback for reliability
     GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-        // IMPORTANT: For quarter zones, call move_frame() before move_resize_frame() (gTile solution)
-        // This ensures window arrives at correct size without visual jump
-        if (isQuarterZone(zone)) {
-            window.move_frame(false, rect.x, rect.y);
-        }
-        window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
+        // Animate window to edge tiling position (subtle, no momentum)
+        animations.animateWindow(window, rect, { subtle: true });
         
         // Note: Square corners feature deferred - requires GLSL shaders
         // See interactive_resize_task.md for future implementation
@@ -871,12 +868,20 @@ export function applyTile(window, zone, workArea, skipOverflowCheck = false) {
             // Calculate halfHeight for initial sizing
             const halfHeight = Math.floor(workArea.height / 2);
             
-            // IMPORTANT: Call move_frame() before move_resize_frame() for smooth transition (gTile solution)
-            fullToQuarterConversion.window.move_frame(false, convertedRect.x, convertedRect.y);
-            fullToQuarterConversion.window.move_resize_frame(false, convertedRect.x, convertedRect.y, convertedRect.width, halfHeight);
+            // Animate both windows to quarter positions
+            animations.animateWindow(fullToQuarterConversion.window, {
+                x: convertedRect.x,
+                y: convertedRect.y,
+                width: convertedRect.width,
+                height: halfHeight
+            }, { subtle: true });
             
-            window.move_frame(false, rect.x, rect.y);
-            window.move_resize_frame(false, rect.x, rect.y, rect.width, halfHeight);
+            animations.animateWindow(window, {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: halfHeight
+            });
             
             console.log(`[MOSAIC WM] Applied quarter tiles with halfHeight=${halfHeight}px, width=${savedFullTileWidth}px`);
             
@@ -1217,7 +1222,8 @@ export function checkQuarterExpansion(workspace, monitor) {
         
         const rect = getZoneRect(TileZone.LEFT_FULL, workArea, window);
         if (rect) {
-            window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
+            // Animate expansion from quarter to half
+            animations.animateWindow(window, rect, { subtle: true });
         }
     }
     
@@ -1239,7 +1245,8 @@ export function checkQuarterExpansion(workspace, monitor) {
         
         const rect = getZoneRect(TileZone.RIGHT_FULL, workArea, window);
         if (rect) {
-            window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
+            // Animate expansion from quarter to half
+            animations.animateWindow(window, rect, { subtle: true });
         }
     }
 }
@@ -1601,7 +1608,7 @@ function handleResizeWithMosaic(window, workspace, monitor) {
     
     // Recalculate remaining space and re-tile mosaic
     console.log(`[MOSAIC WM] Edge-tiled window resized - re-tiling mosaic`);
-    tiling.tileWorkspaceWindows(workspace, null, monitor, false);
+    tiling.tileWorkspaceWindows(workspace, null, monitor, true); // Enable animations
 }
 
 /**

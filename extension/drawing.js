@@ -19,13 +19,7 @@ var _tilePreview = null;
  * @param {number} h - Height of the box
  */
 export function rect(x, y, w, h) {
-    console.log(`[MOSAIC WM] rect() called: edgeTilingActive=${edgeTiling.isEdgeTilingActive()}, boxes=${boxes.length}`);
-    
-    // Don't show mosaic preview if edge tiling is active
-    if (edgeTiling.isEdgeTilingActive()) {
-        console.log(`[MOSAIC WM] Skipping mosaic preview - edge tiling is active`);
-        return; // Skip mosaic preview entirely when edge tiling is active
-    }
+    console.log(`[MOSAIC WM] rect() called: boxes=${boxes.length}`);
     
     // Hide edge tiling preview when showing mosaic preview
     hideTilePreview();

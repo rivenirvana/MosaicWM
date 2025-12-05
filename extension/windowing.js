@@ -240,6 +240,9 @@ export function moveOversizedWindow(window) {
 
     console.log(`[MOSAIC WM] Moving overflow window ${window.get_id()} from workspace ${previous_workspace.index()} to ${new_workspace.index()}`);
 
+    // Capture starting position before moving
+    const startRect = window.get_frame_rect();
+
     // Move window to new workspace
     window.change_workspace(new_workspace);
     global.workspace_manager.reorder_workspace(new_workspace, previous_workspace.index() + 1);
@@ -254,6 +257,16 @@ export function moveOversizedWindow(window) {
     if (switchFocusToMovedWindow) {
         new_workspace.activate(getTimestamp());
     }
+    
+    // ANIMATE A→B: Window moving from old position to new workspace position
+    // Use idle_add to ensure window is positioned in new workspace first
+    import('./animations.js').then(animations => {
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            const endRect = window.get_frame_rect();
+            animations.animateWindowMove(window, startRect, endRect);
+            return GLib.SOURCE_REMOVE;
+        });
+    });
 
     return new_workspace;
 }
