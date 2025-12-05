@@ -384,6 +384,26 @@ export function animateWindowMove(window, fromRect, toRect, options = {}) {
  * @param {Meta.Window|null} draggedWindow - Currently dragged window to exclude
  */
 export function animateReTiling(windowLayouts, draggedWindow = null) {
+    // If only one window, check if it actually needs to move/resize
+    // If not, let GNOME's native open animation happen
+    if (windowLayouts.length === 1) {
+        const { window, rect } = windowLayouts[0];
+        const currentRect = window.get_frame_rect();
+        
+        // Check if window needs significant repositioning
+        const needsMove = Math.abs(currentRect.x - rect.x) > 10 || 
+                         Math.abs(currentRect.y - rect.y) > 10 ||
+                         Math.abs(currentRect.width - rect.width) > 10 ||
+                         Math.abs(currentRect.height - rect.height) > 10;
+        
+        if (!needsMove) {
+            // First window opening - just position it, let GNOME animate
+            window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);
+            return;
+        }
+        // Window needs to expand/move (e.g., other window closed), animate it
+    }
+    
     for (const {window, rect} of windowLayouts) {
         animateWindow(window, rect, { draggedWindow });
     }
