@@ -383,10 +383,10 @@ export function saveWindowState(window) {
     const winId = window.get_id();
     const existingState = _windowStates.get(winId);
     
-    // Only save if window is NOT already edge-tiled
-    // This preserves the original pre-tiling dimensions
-    if (existingState && existingState.zone !== TileZone.NONE) {
-        console.log(`[MOSAIC WM] Window ${winId} already has edge tile state, not overwriting`);
+    // Only save if window has NO saved state at all
+    // This preserves the original pre-tiling dimensions even when window goes to mosaic and back
+    if (existingState) {
+        console.log(`[MOSAIC WM] Window ${winId} already has saved state (${existingState.width}x${existingState.height}), preserving it`);
         return;
     }
     
@@ -900,20 +900,46 @@ export function applyTile(window, zone, workArea, skipOverflowCheck = false) {
                 
                 console.log(`[MOSAIC WM] Post-resize check: converted=${actualConvertedFrame.height}px, new=${actualNewFrame.height}px, target=${halfHeight}px`);
                 
-                // If either didn't reach halfHeight, adjust the other to fill space
-                if (actualConvertedFrame.height > halfHeight || actualNewFrame.height > halfHeight) {
+                // If either didn't reach halfHeight, adjust positions
+                if (actualConvertedFrame.height !== halfHeight || actualNewFrame.height !== halfHeight) {
                     if (zone === TileZone.BOTTOM_LEFT || zone === TileZone.BOTTOM_RIGHT) {
-                        // New window is BOTTOM, adjust it to fill remaining space
-                        const remainingHeight = workArea.height - actualConvertedFrame.height;
-                        const newY = workArea.y + actualConvertedFrame.height;
-                        window.move_resize_frame(false, rect.x, newY, rect.width, remainingHeight);
-                        console.log(`[MOSAIC WM] Adjusted BOTTOM to ${remainingHeight}px at y=${newY}`);
+                        // New window is BOTTOM
+                        // If BOTTOM exceeded target, it has min size > 50%, so TOP must shrink
+                        if (actualNewFrame.height > halfHeight) {
+                            const topHeight = workArea.height - actualNewFrame.height;
+                            const bottomY = workArea.y + topHeight;
+                            
+                            // Resize TOP first
+                            fullToQuarterConversion.window.move_resize_frame(false, convertedRect.x, workArea.y, convertedRect.width, topHeight);
+                            // Then position BOTTOM
+                            window.move_resize_frame(false, rect.x, bottomY, rect.width, actualNewFrame.height);
+                            console.log(`[MOSAIC WM] BOTTOM has min>${halfHeight}px: TOP=${topHeight}px, BOTTOM=${actualNewFrame.height}px at y=${bottomY}`);
+                        } else {
+                            // TOP exceeded or both didn't reach - BOTTOM fills remaining space
+                            const bottomY = actualConvertedFrame.y + actualConvertedFrame.height;
+                            const bottomHeight = (workArea.y + workArea.height) - bottomY;
+                            
+                            window.move_resize_frame(false, rect.x, bottomY, rect.width, bottomHeight);
+                            console.log(`[MOSAIC WM] TOP adjusted: BOTTOM fills remaining y=${bottomY}, height=${bottomHeight}px`);
+                        }
                     } else {
-                        // New window is TOP, adjust BOTTOM to fill remaining space
-                        const remainingHeight = workArea.height - actualNewFrame.height;
-                        const newY = workArea.y + actualNewFrame.height;
-                        fullToQuarterConversion.window.move_resize_frame(false, convertedRect.x, newY, convertedRect.width, remainingHeight);
-                        console.log(`[MOSAIC WM] Adjusted BOTTOM to ${remainingHeight}px at y=${newY}`);
+                        // New window is TOP
+                        // If TOP exceeded target, it has min size > 50%, so BOTTOM must shrink
+                        if (actualNewFrame.height > halfHeight) {
+                            const bottomHeight = workArea.height - actualNewFrame.height;
+                            const bottomY = workArea.y + actualNewFrame.height;
+                            
+                            // Position BOTTOM after TOP
+                            fullToQuarterConversion.window.move_resize_frame(false, convertedRect.x, bottomY, convertedRect.width, bottomHeight);
+                            console.log(`[MOSAIC WM] TOP has min>${halfHeight}px: TOP=${actualNewFrame.height}px, BOTTOM=${bottomHeight}px at y=${bottomY}`);
+                        } else {
+                            // BOTTOM exceeded or both didn't reach - BOTTOM fills remaining space
+                            const bottomY = actualNewFrame.y + actualNewFrame.height;
+                            const bottomHeight = (workArea.y + workArea.height) - bottomY;
+                            
+                            fullToQuarterConversion.window.move_resize_frame(false, convertedRect.x, bottomY, convertedRect.width, bottomHeight);
+                            console.log(`[MOSAIC WM] TOP adjusted: BOTTOM fills remaining y=${bottomY}, height=${bottomHeight}px`);
+                        }
                     }
                 }
                 
