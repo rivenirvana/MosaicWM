@@ -66,6 +66,7 @@ export default class WindowMosaicExtension extends Extension {
         this._currentZone = TileZone.NONE;
         this._grabOpBeginId = null;
         this._grabOpEndId = null;
+        this._currentGrabOp = null; // Track current grab operation
 
         // Manager references (will be created in enable())
         this.edgeTilingManager = null;
@@ -474,9 +475,35 @@ export default class WindowMosaicExtension extends Extension {
                 let canFit = this.tilingManager.canFitWindow(window, workspace, monitor);
                 
                 if (!canFit) {
+                    // Check if user is manually resizing by checking for active grab operation
+                    const isManualResize = this._currentGrabOp && constants.RESIZE_GRAB_OPS.includes(this._currentGrabOp);
+                    
                     if (this._resizeOverflowWindow !== window) {
                         this._resizeOverflowWindow = window;
-                        Logger.log('[MOSAIC WM] Resize overflow detected - window too large');
+                        
+                        if (isManualResize) {
+                            // Manual resize: wait for user to release (grab-op-end will handle it)
+                            Logger.log('[MOSAIC WM] Resize overflow detected during manual resize - will move on release');
+                        } else {
+                            // Automatic resize: move immediately
+                            Logger.log('[MOSAIC WM] Resize overflow detected (automatic) - moving window immediately');
+                            
+                            let oldWorkspace = workspace;
+                            let newWorkspace = this.windowingManager.moveOversizedWindow(window);
+                            if (newWorkspace) {
+                                this.tilingManager.tileWorkspaceWindows(oldWorkspace, false, monitor, false);
+                                workspace = newWorkspace;
+                            }
+                            this._resizeOverflowWindow = null;
+                            this._sizeChanged = false;
+                            return;
+                        }
+                    }
+                    
+                    // If manual resize, continue with normal tiling (don't return)
+                    if (!isManualResize) {
+                        this._sizeChanged = false;
+                        return;
                     }
                 } else {
                     if (this._resizeOverflowWindow === window) {
@@ -492,6 +519,9 @@ export default class WindowMosaicExtension extends Extension {
     }
 
     _grabOpBeginHandler = (_, window, grabpo) => {
+        // Track current grab operation
+        this._currentGrabOp = grabpo;
+        
         const isResizeOp = constants.RESIZE_GRAB_OPS.includes(grabpo);
         if (isResizeOp) {
             this.animationsManager.setResizingWindow(window.get_id());
@@ -634,6 +664,9 @@ export default class WindowMosaicExtension extends Extension {
     }
     
     _grabOpEndHandler = (_, window, grabpo) => {
+        // Clear current grab operation
+        this._currentGrabOp = null;
+        
         if (grabpo === constants.GRAB_OP_MOVING && window === this._draggedWindow) {
             if (this._edgeTilingPollId) {
                 GLib.source_remove(this._edgeTilingPollId);
@@ -706,6 +739,7 @@ export default class WindowMosaicExtension extends Extension {
                 Logger.log(`[MOSAIC WM] Cleared resize tracking for window ${window.get_id()}`);
             }
             
+            
             if(isResizeEnd) {
                 const tileState = this.edgeTilingManager.getWindowState(window);
                 const isEdgeTiled = tileState && tileState.zone !== TileZone.NONE;
@@ -717,15 +751,8 @@ export default class WindowMosaicExtension extends Extension {
                     Logger.log(`[MOSAIC WM] Resize ended (grabpo=${grabpo}) for QUARTER edge-tiled window - fixing final sizes`);
                     this.edgeTilingManager.fixQuarterPairSizes(window, tileState.zone);
                 }
-            }
-            
-            if( (grabpo === constants.GRAB_OP_MOVING || grabpo === constants.GRAB_OP_KEYBOARD_MOVING) && 
-                !(this.windowingManager.isMaximizedOrFullscreen(window)) &&
-                !skipTiling) 
-            {
-                this.tilingManager.tileWorkspaceWindows(window.get_workspace(), window, window.get_monitor(), false);
-            }
-            if(grabpo === constants.GRAB_OP_RESIZING_NE) { 
+                
+                // Handle resize overflow for ALL resize operations
                 if (this._resizeOverflowWindow === window) {
                     Logger.log('[MOSAIC WM] Resize ended with overflow - moving window to new workspace');
                     let oldWorkspace = window.get_workspace();
@@ -734,9 +761,17 @@ export default class WindowMosaicExtension extends Extension {
                         this.tilingManager.tileWorkspaceWindows(oldWorkspace, false, window.get_monitor(), false);
                     }
                     this._resizeOverflowWindow = null;
-                } else {
+                } else if (!isEdgeTiled) {
+                    // Only tile if not edge-tiled (edge-tiled windows already handled above)
                     this._tileWindowWorkspace(window);
                 }
+            }
+            
+            if( (grabpo === constants.GRAB_OP_MOVING || grabpo === constants.GRAB_OP_KEYBOARD_MOVING) && 
+                !(this.windowingManager.isMaximizedOrFullscreen(window)) &&
+                !skipTiling) 
+            {
+                this.tilingManager.tileWorkspaceWindows(window.get_workspace(), window, window.get_monitor(), false);
             }
         } else
             this.reorderingManager.stopDrag(window, true);
