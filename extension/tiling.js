@@ -153,103 +153,143 @@ export class TilingManager {
         return descriptors;
     }
 
+    /**
+     * Tile windows with balanced radial distribution.
+     * Creates homogeneous layout that grows from center outward.
+     */
     _tile(windows, work_area) {
-        let vertical = false;
-        
-        let totalRequiredArea = 0;
-        for(let window of windows) {
-            totalRequiredArea += (window.width * window.height);
+        if (windows.length === 0) {
+            return {
+                x: work_area.x,
+                y: work_area.y,
+                overflow: false,
+                vertical: false,
+                levels: [],
+                windows: []
+            };
         }
         
-        const availableArea = work_area.width * work_area.height;
+        const spacing = constants.WINDOW_SPACING;
         
-        let levels = [new Level(work_area)];
-        let total_width = 0;
-        let total_height = 0;
-        let x, y;
-
+        let avgWidth = 0, avgHeight = 0;
+        for (const w of windows) {
+            avgWidth += w.width;
+            avgHeight += w.height;
+        }
+        avgWidth /= windows.length;
+        avgHeight /= windows.length;
+        
+        // Calculate optimal grid dimensions
+        const { rows: numRows, windowsPerRow } = this._calculateOptimalGrid(
+            windows.length,
+            avgWidth,
+            avgHeight,
+            work_area
+        );
+        
+        // Distribute windows across rows
+        const levels = [];
+        let windowIndex = 0;
+        let totalHeight = 0;
         let overflow = false;
-
-        if(!vertical) {
-            let window_widths = 0;
-            windows.map(w => window_widths += w.width + constants.WINDOW_SPACING)
-            window_widths -= constants.WINDOW_SPACING;
-
-            let n_levels = Math.round(window_widths / work_area.width) + 1;
-            let level = levels[0];
-            let level_index = 0;
+        
+        for (let r = 0; r < numRows; r++) {
+            const level = new Level(work_area);
+            const windowsInThisRow = windowsPerRow[r];
             
-            for(let window of windows) {
-                if(level.width + constants.WINDOW_SPACING + window.width > work_area.width) {
-                    total_width = Math.max(level.width, total_width);
-                    total_height += level.height + constants.WINDOW_SPACING;
-                    level.x = (work_area.width - level.width) / 2 + work_area.x;
-                    levels.push(new Level(work_area));
-                    level_index++;
-                    level = levels[level_index];
+            for (let i = 0; i < windowsInThisRow && windowIndex < windows.length; i++) {
+                const w = windows[windowIndex++];
+                if (level.width + w.width + (level.width > 0 ? spacing : 0) > work_area.width) {
+                    overflow = true;
                 }
                 
-                if( Math.max(window.height, level.height) + total_height > work_area.height || 
-                    window.width + level.width > work_area.width){
-                    overflow = true;
-                    continue;
-                }
-                level.windows.push(window);
-                if(level.width !== 0)
-                    level.width += constants.WINDOW_SPACING;
-                level.width += window.width;
-                level.height = Math.max(window.height, level.height);
+                level.windows.push(w);
+                if (level.width > 0) level.width += spacing;
+                level.width += w.width;
+                level.height = Math.max(level.height, w.height);
             }
-            total_width = Math.max(level.width, total_width);
-            total_height += level.height;
+            
             level.x = (work_area.width - level.width) / 2 + work_area.x;
-
-            y = (work_area.height - total_height) / 2 + work_area.y;
-        } else {
-            // Vertical - skipping implementation details for brevity, assume similar structure
-            // In original code it was partially implemented.
-            // Copied from original for completeness:
-            let window_heights = 0;
-            windows.map(w => window_heights += w.height + constants.WINDOW_SPACING);
-            window_heights -= constants.WINDOW_SPACING;
-            
-            let level = levels[0];
-            let level_index = 0;
-            let avg_level_height = window_heights / (Math.floor(window_heights / work_area.height) + 1);
-            
-            for(let window of windows) {
-                if(level.width > avg_level_height) { // Original logic
-                     total_width = Math.max(level.width, total_width);
-                     total_height += level.height + constants.WINDOW_SPACING;
-                     level.x = (work_area.width - level.width) / 2 + work_area.x;
-                     levels.push(new Level(work_area));
-                     level_index++;
-                     level = levels[level_index];
-                }
-                level.windows.push(window);
-                if(level.width !== 0) level.width += constants.WINDOW_SPACING;
-                level.width += window.width;
-                level.height = Math.max(window.height, level.height);
+            if (totalHeight + level.height + spacing > work_area.height && r > 0) {
+                overflow = true;
             }
-            total_width = Math.max(level.width, total_width);
-            total_height += level.height;
-            level.x = (work_area.width - level.width) / 2 + work_area.x;
-            y = (work_area.height - total_height) / 2 + work_area.y;
+            
+            if (r > 0) totalHeight += spacing;
+            totalHeight += level.height;
+            
+            levels.push(level);
         }
         
-        let all_windows = [];
-        for (let level of levels) {
-            all_windows = all_windows.concat(level.windows);
-        }
+        const y = (work_area.height - totalHeight) / 2 + work_area.y;
         
         return {
-            x: x,
+            x: work_area.x,
             y: y,
             overflow: overflow,
-            vertical: vertical,
+            vertical: false,
             levels: levels,
-            windows: all_windows
+            windows: windows
         };
+    }
+    
+    /**
+     * Calculate optimal grid dimensions for balanced layout
+     * Aims for a square-ish layout (aspect ratio close to 1:1)
+     */
+    _calculateOptimalGrid(windowCount, avgWidth, avgHeight, work_area) {
+        if (windowCount <= 0) return { rows: 0, windowsPerRow: [] };
+        if (windowCount === 1) return { rows: 1, windowsPerRow: [1] };
+        if (windowCount === 2) return { rows: 1, windowsPerRow: [2] };
+        
+        const spacing = constants.WINDOW_SPACING;
+        
+        const maxPerRow = Math.floor((work_area.width + spacing) / (avgWidth + spacing));
+        const workspaceAspect = work_area.width / work_area.height;
+        
+        let bestRows = 1;
+        let bestScore = Infinity;
+        
+        for (let rows = 1; rows <= windowCount; rows++) {
+            const cols = Math.ceil(windowCount / rows);
+            
+            if (cols > maxPerRow) continue;
+
+            const layoutWidth = cols * avgWidth + (cols - 1) * spacing;
+            const layoutHeight = rows * avgHeight + (rows - 1) * spacing;
+            if (layoutWidth > work_area.width || layoutHeight > work_area.height) continue;
+            
+            const layoutAspect = layoutWidth / layoutHeight;
+            const aspectDiff = Math.abs(layoutAspect - workspaceAspect);
+            const emptySpaces = rows * cols - windowCount;
+            const score = aspectDiff + emptySpaces * 0.3;
+            
+            if (score < bestScore) {
+                bestScore = score;
+                bestRows = rows;
+            }
+        }
+        
+        // Distribute windows symmetrically (extras go to center rows)
+        const windowsPerRow = new Array(bestRows).fill(0);
+        const basePerRow = Math.floor(windowCount / bestRows);
+        let remainder = windowCount % bestRows;
+
+        for (let r = 0; r < bestRows; r++) windowsPerRow[r] = basePerRow;
+
+        if (remainder > 0) {
+            const centerIndex = Math.floor(bestRows / 2);
+            let left = centerIndex;
+            let right = centerIndex;
+            
+            while (remainder > 0) {
+                if (left >= 0 && left < bestRows) { windowsPerRow[left]++; remainder--; }
+                if (remainder > 0 && right !== left && right >= 0 && right < bestRows) { windowsPerRow[right]++; remainder--; }
+                left--;
+                right++;
+            }
+        }
+        
+        return { rows: bestRows, windowsPerRow };
     }
 
     _getWorkingInfo(workspace, window, _monitor, excludeFromTiling = false) {
@@ -263,13 +303,11 @@ export class TilingManager {
         if (window && excludeFromTiling && !this.isDragging) {
             const windowId = window.get_id();
             meta_windows = meta_windows.filter(w => w.get_id() !== windowId);
-            Logger.log(`[MOSAIC WM] Excluding overflow window ${windowId} from mosaic calculation`);
         }
         
         if (this.isDragging && this.dragRemainingSpace && window) {
             const draggedId = window.get_id();
             meta_windows = meta_windows.filter(w => w.get_id() !== draggedId);
-            Logger.log(`[MOSAIC WM] Excluding dragged window ${draggedId} from mosaic calculation`);
         }
         
         let edgeTiledWindows = [];
@@ -287,7 +325,6 @@ export class TilingManager {
                 return false;
         }
 
-        Logger.log(`[MOSAIC WM] Creating descriptors for ${windowsForSwaps.length} windows`);
         let _windows = this.windowsToDescriptors(windowsForSwaps, current_monitor, window);
         
         this.applySwaps(workspace, _windows);
@@ -311,8 +348,6 @@ export class TilingManager {
     }
 
     _drawTile(tile_info, work_area, meta_windows) {
-        Logger.log(`[MOSAIC WM] drawTile called `);
-        
         let levels = tile_info.levels;
         let _x = tile_info.x;
         let _y = tile_info.y;
