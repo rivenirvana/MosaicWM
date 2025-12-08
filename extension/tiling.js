@@ -90,8 +90,15 @@ export class TilingManager {
     applyTmpSwap(workspace) {
         if(!workspace.swaps)
             workspace.swaps = [];
-        if(this.tmp_swap.length !== 0)
+        if(this.tmp_swap.length !== 0) {
+            // Replace instead of accumulate to avoid conflicting swaps
+            // Find and remove any existing swap involving these windows
+            const [id1, id2] = this.tmp_swap;
+            workspace.swaps = workspace.swaps.filter(s => 
+                !(s[0] === id1 || s[1] === id1 || s[0] === id2 || s[1] === id2)
+            );
             workspace.swaps.push(this.tmp_swap);
+        }
     }
 
     applySwaps(workspace, array) {
@@ -154,8 +161,9 @@ export class TilingManager {
     }
 
     /**
-     * Tile windows with balanced radial distribution.
-     * Creates homogeneous layout that grows from center outward.
+     * Tile windows with dynamic shelf orientation.
+     * If a window's height exceeds 50% of workspace, use vertical shelves (columns).
+     * Otherwise, use horizontal shelves (rows).
      */
     _tile(windows, work_area) {
         if (windows.length === 0) {
@@ -171,6 +179,263 @@ export class TilingManager {
         
         const spacing = constants.WINDOW_SPACING;
         
+        // Check if any window is taller than 50% of workspace height
+        let maxHeight = 0;
+        for (const w of windows) {
+            maxHeight = Math.max(maxHeight, w.height);
+        }
+        
+        const useVerticalShelves = maxHeight > work_area.height * 0.65;
+        
+        Logger.log(`[MOSAIC WM] _tile: ${windows.length} windows, workArea=${work_area.width}x${work_area.height}, maxWinH=${maxHeight}, threshold=${Math.round(work_area.height * 0.65)}, useVertical=${useVerticalShelves}`);
+        
+        if (useVerticalShelves) {
+            return this._verticalShelves(windows, work_area, spacing);
+        } else {
+            return this._horizontalShelves(windows, work_area, spacing);
+        }
+    }
+    
+    /**
+     * Vertical shelves layout - windows stack in columns side by side.
+     */
+    _verticalShelves(windows, work_area, spacing) {
+        // For 1-2 windows, use simple centered column
+        if (windows.length <= 2) {
+            return this._simpleCenteredColumn(windows, work_area, spacing);
+        }
+        
+        // BIN PACKING without height sorting - preserves array order for swaps
+        const columns = []; // Each column: { windows: [], height: 0, width: 0 }
+        
+        for (const w of windows) {
+            let placed = false;
+            
+            // Try to fit in existing column
+            for (const col of columns) {
+                const newHeight = col.height + (col.height > 0 ? spacing : 0) + w.height;
+                if (newHeight <= work_area.height) {
+                    col.windows.push(w);
+                    col.height = newHeight;
+                    col.width = Math.max(col.width, w.width);
+                    placed = true;
+                    break;
+                }
+            }
+            
+            // If doesn't fit anywhere, create new column
+            if (!placed) {
+                const totalWidth = columns.reduce((s, c) => s + c.width, 0) + 
+                                   (columns.length > 0 ? columns.length * spacing : 0) + w.width;
+                
+                if (totalWidth <= work_area.width || columns.length === 0) {
+                    columns.push({ windows: [w], height: w.height, width: w.width });
+                } else {
+                    // Force into column with most space (overflow case)
+                    let bestCol = columns[0];
+                    let minHeight = columns[0].height;
+                    for (const col of columns) {
+                        if (col.height < minHeight) {
+                            minHeight = col.height;
+                            bestCol = col;
+                        }
+                    }
+                    bestCol.windows.push(w);
+                    bestCol.height += spacing + w.height;
+                    bestCol.width = Math.max(bestCol.width, w.width);
+                }
+            }
+        }
+        
+        // Convert columns to levels for rendering
+        const levels = [];
+        let totalWidth = 0;
+        let overflow = false;
+        
+        for (let c = 0; c < columns.length; c++) {
+            const col = columns[c];
+            const level = new Level(work_area);
+            
+            // Recalculate height for this column's windows
+            let colHeight = 0;
+            for (const w of col.windows) {
+                level.windows.push(w);
+                if (colHeight > 0) colHeight += spacing;
+                colHeight += w.height;
+                level.width = Math.max(level.width, w.width);
+            }
+            level.height = colHeight;
+            
+            // Check if column overflows height
+            if (level.height > work_area.height) {
+                overflow = true;
+            }
+            
+            // Center column vertically
+            level.y = (work_area.height - level.height) / 2 + work_area.y;
+            
+            // Check width overflow
+            if (totalWidth + level.width + spacing > work_area.width && c > 0) {
+                overflow = true;
+            }
+            
+            if (c > 0) totalWidth += spacing;
+            totalWidth += level.width;
+            
+            levels.push(level);
+        }
+        
+        // Calculate horizontal centering
+        const startX = (work_area.width - totalWidth) / 2 + work_area.x;
+        const levelCount = levels.length;
+        const centerColIndex = (levelCount - 1) / 2; // e.g., 0.5 for 2 cols, 1 for 3 cols
+        
+        // Set X positions for each column with CENTER-POINTING alignment
+        let xPos = startX;
+        for (let colIdx = 0; colIdx < levelCount; colIdx++) {
+            const level = levels[colIdx];
+            level.x = xPos;
+            
+            // Determine horizontal alignment based on column position
+            // Left columns → align RIGHT (towards center)
+            // Right columns → align LEFT (towards center)
+            // Center column → centered
+            let alignMode = 'center';
+            if (levelCount > 1) {
+                if (colIdx < centerColIndex) {
+                    alignMode = 'right'; // Left column → push windows right
+                } else if (colIdx > centerColIndex) {
+                    alignMode = 'left';  // Right column → push windows left
+                }
+            }
+            
+            // Stack windows vertically (packed, centered vertically)
+            let totalColHeight = 0;
+            for (const win of level.windows) {
+                totalColHeight += win.height;
+            }
+            totalColHeight += (level.windows.length - 1) * spacing;
+            
+            let yPos = (work_area.height - totalColHeight) / 2 + work_area.y;
+            
+            for (const win of level.windows) {
+                // Apply horizontal alignment within column
+                if (alignMode === 'left') {
+                    win.targetX = xPos; // Align to left edge of column
+                } else if (alignMode === 'right') {
+                    win.targetX = xPos + level.width - win.width; // Align to right edge
+                } else {
+                    win.targetX = xPos + (level.width - win.width) / 2; // Centered
+                }
+                win.targetY = yPos;
+                yPos += win.height + spacing;
+            }
+            
+            xPos += level.width + spacing;
+        }
+        
+        Logger.log(`[MOSAIC WM] verticalShelves: ${windows.length} windows -> ${levels.length} cols, totalW=${totalWidth}, workH=${work_area.height}`);
+        
+        return {
+            x: startX,
+            y: work_area.y,
+            overflow: overflow,
+            vertical: true,
+            levels: levels,
+            windows: windows
+        };
+    }
+    
+    /**
+     * Helper for 1-2 windows in vertical mode - simple centered column.
+     */
+    _simpleCenteredColumn(windows, work_area, spacing) {
+        // Calculate total height if stacked
+        let totalHeight = 0;
+        let maxWidth = 0;
+        for (const w of windows) {
+            if (totalHeight > 0) totalHeight += spacing;
+            totalHeight += w.height;
+            maxWidth = Math.max(maxWidth, w.width);
+        }
+        
+        // If windows DON'T fit when stacked, put them side by side in separate columns
+        if (totalHeight > work_area.height && windows.length === 2) {
+            // Create 2 columns side by side
+            const totalWidth = windows[0].width + spacing + windows[1].width;
+            const startX = (work_area.width - totalWidth) / 2 + work_area.x;
+            
+            const levels = [];
+            let xPos = startX;
+            
+            for (const w of windows) {
+                const level = new Level(work_area);
+                level.windows.push(w);
+                level.width = w.width;
+                level.height = w.height;
+                level.x = xPos;
+                level.y = (work_area.height - w.height) / 2 + work_area.y;
+                
+                w.targetX = level.x;
+                w.targetY = level.y;
+                
+                levels.push(level);
+                xPos += w.width + spacing;
+            }
+            
+            const overflow = totalWidth > work_area.width;
+            
+            return {
+                x: startX,
+                y: work_area.y,
+                overflow: overflow,
+                vertical: true,
+                levels: levels,
+                windows: windows
+            };
+        }
+        
+        // Windows FIT when stacked - use single column
+        const level = new Level(work_area);
+        for (const w of windows) {
+            level.windows.push(w);
+        }
+
+        level.width = maxWidth;
+        level.height = totalHeight;
+        level.x = (work_area.width - maxWidth) / 2 + work_area.x;
+        level.y = (work_area.height - totalHeight) / 2 + work_area.y;
+
+        // Set target positions for each window
+        let yPos = level.y;
+        for (const w of level.windows) {
+            w.targetX = level.x + (maxWidth - w.width) / 2;
+            w.targetY = yPos;
+            yPos += w.height + spacing;
+        }
+
+        const overflow = totalHeight > work_area.height || maxWidth > work_area.width;
+
+        return {
+            x: level.x,
+            y: level.y,
+            overflow: overflow,
+            vertical: true,
+            levels: [level],
+            windows: windows
+        };
+    }
+    
+    /**
+     * Original horizontal shelves layout - windows arrange in rows.
+     */
+    _horizontalShelves(windows, work_area, spacing) {
+        // For 1-2 windows, use simple centered row
+        if (windows.length <= 2) {
+            return this._simpleCenteredRow(windows, work_area, spacing);
+        }
+        
+        // Calculate average dimensions
         let avgWidth = 0, avgHeight = 0;
         for (const w of windows) {
             avgWidth += w.width;
@@ -228,6 +493,37 @@ export class TilingManager {
             overflow: overflow,
             vertical: false,
             levels: levels,
+            windows: windows
+        };
+    }
+
+    /**
+     * Helper for 1-2 windows, simple centered row.
+     */
+    _simpleCenteredRow(windows, work_area, spacing) {
+        const level = new Level(work_area);
+        let totalWidth = 0;
+        let maxHeight = 0;
+
+        for (const w of windows) {
+            if (totalWidth > 0) totalWidth += spacing;
+            totalWidth += w.width;
+            maxHeight = Math.max(maxHeight, w.height);
+            level.windows.push(w);
+        }
+
+        level.width = totalWidth;
+        level.height = maxHeight;
+        level.x = (work_area.width - totalWidth) / 2 + work_area.x;
+        
+        const y = (work_area.height - maxHeight) / 2 + work_area.y;
+
+        return {
+            x: work_area.x,
+            y: y,
+            overflow: totalWidth > work_area.width || maxHeight > work_area.height,
+            vertical: false,
+            levels: [level],
             windows: windows
         };
     }
@@ -391,8 +687,6 @@ export class TilingManager {
                         const window = meta_windows.find(w => w.get_id() === windowDesc.id);
                         if (window) {
                             if (windowDesc.id === resizingWindowId) {
-                                // If this is the window being resized, move it immediately without animation
-                                // The animation manager will handle its animation separately.
                                 window.move_frame(false, x, y + y_offset);
                             } else {
                                 windowLayouts.push({
@@ -409,6 +703,36 @@ export class TilingManager {
                         x += windowDesc.width + constants.WINDOW_SPACING;
                     }
                     y += level.height + constants.WINDOW_SPACING;
+                }
+            } else {
+                // Vertical layout: each level is a column
+                let x = tile_info.x;
+                for (let level of levels) {
+                    let y = level.y;
+                    for (let windowDesc of level.windows) {
+                        // Use targetX/targetY if set, otherwise calculate
+                        const targetX = windowDesc.targetX !== undefined ? windowDesc.targetX : x;
+                        const targetY = windowDesc.targetY !== undefined ? windowDesc.targetY : y;
+                        
+                        const window = meta_windows.find(w => w.get_id() === windowDesc.id);
+                        if (window) {
+                            if (windowDesc.id === resizingWindowId) {
+                                window.move_frame(false, targetX, targetY);
+                            } else {
+                                windowLayouts.push({
+                                    window: window,
+                                    rect: {
+                                        x: targetX,
+                                        y: targetY,
+                                        width: windowDesc.width,
+                                        height: windowDesc.height
+                                    }
+                                });
+                            }
+                        }
+                        y += windowDesc.height + constants.WINDOW_SPACING;
+                    }
+                    x += level.width + constants.WINDOW_SPACING;
                 }
             }
             
@@ -670,6 +994,8 @@ class WindowDescriptor {
                     const positionChanged = Math.abs(currentRect.x - x) > 5 || Math.abs(currentRect.y - y) > 5;
                     const sizeChanged = Math.abs(currentRect.width - this.width) > 5 || Math.abs(currentRect.height - this.height) > 5;
                     
+                    Logger.log(`[MOSAIC WM] draw (drag): id=${this.id}, target=(${x},${y}), current=(${currentRect.x},${currentRect.y}), posChanged=${positionChanged}`);
+                    
                     if (positionChanged || sizeChanged) {
                         window.move_resize_frame(false, x, y, this.width, this.height);
                         const windowActor = window.get_compositor_private();
@@ -721,7 +1047,10 @@ Level.prototype.draw_horizontal = function(meta_windows, work_area, y, masks, is
 Level.prototype.draw_vertical = function(meta_windows, x, masks, isDragging, drawingManager) {
     let y = this.y;
     for(let window of this.windows) {
-        window.draw(meta_windows, x, y, masks, isDragging, drawingManager);
+        // Use targetX/targetY if set (for center-gravity alignment), otherwise use calculated position
+        const drawX = window.targetX !== undefined ? window.targetX : x;
+        const drawY = window.targetY !== undefined ? window.targetY : y;
+        window.draw(meta_windows, drawX, drawY, masks, isDragging, drawingManager);
         y += window.height + constants.WINDOW_SPACING;
     }
 }
