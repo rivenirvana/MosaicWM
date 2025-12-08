@@ -7,8 +7,10 @@ import * as main from 'resource:///org/gnome/shell/ui/main.js';
 
 export class DrawingManager {
     constructor() {
-        // Array of currently displayed feedback boxes
+        // Active feedback boxes
         this._boxes = [];
+        // Pool of reusable boxes to avoid constant create/destroy churn
+        this._boxPool = [];
         
         // Tile preview overlay for edge tiling
         this._tilePreview = null;
@@ -21,25 +23,33 @@ export class DrawingManager {
     }
 
     rect(x, y, w, h) {
-        // Hide edge tiling preview when showing mosaic preview
-        this.hideTilePreview();
+        // Do not hide edge tiling preview here - let Extension.js manage it
         
-        const box = new st.Widget({ 
-            style_class: "mosaic-preview",
-            opacity: 200 // Ensure it's visible
-        });
+        let box;
+        if (this._boxPool.length > 0) {
+            box = this._boxPool.pop();
+            box.show();
+        } else {
+            box = new st.Widget({ 
+                style_class: "mosaic-preview",
+                opacity: 200 // Ensure it's visible
+            });
+            main.uiGroup.add_child(box);
+        }
+        
         box.set_position(x, y);
         box.set_size(w, h);
         
         this._boxes.push(box);
-        main.uiGroup.add_child(box);
     }
 
     removeBoxes() {
-        for(let box of this._boxes) {
-            main.uiGroup.remove_child(box);
+        // Recycle boxes instead of destroying
+        while(this._boxes.length > 0) {
+            let box = this._boxes.pop();
+            box.hide();
+            this._boxPool.push(box);
         }
-        this._boxes = [];
     }
 
     showTilePreview(zone, workArea, window = null) {
@@ -75,8 +85,17 @@ export class DrawingManager {
 
     clearActors() {
         this.removeBoxes();
+        
+        // Clean up pool
+        while(this._boxPool.length > 0) {
+            let box = this._boxPool.pop();
+            main.uiGroup.remove_child(box);
+            box.destroy();
+        }
+        
         if (this._tilePreview) {
             main.uiGroup.remove_child(this._tilePreview);
+            this._tilePreview.destroy();
             this._tilePreview = null;
         }
         this._edgeTilingManager = null;
