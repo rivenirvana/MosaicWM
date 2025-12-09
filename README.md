@@ -46,6 +46,13 @@ gnome-extensions enable mosaicwm@cleomenezesjr.github.io
 # Log out and log back in
 ```
 
+### Manual Installation
+
+1. Download the latest release from GitHub
+2. Extract to `~/.local/share/gnome-shell/extensions/mosaicwm@cleomenezesjr.github.io/`
+3. Restart GNOME Shell (log out and log back in)
+4. Enable via Extensions app or: `gnome-extensions enable mosaicwm@cleomenezesjr.github.io`
+
 ## 🎮 Usage
 
 Once enabled, the extension works automatically:
