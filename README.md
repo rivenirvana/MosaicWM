@@ -34,7 +34,7 @@ This aligns with GNOME's philosophy of reducing cognitive load and letting users
 
 ```bash
 # Clone the repository
-git clone git@github.com:CleoMenezesJr/MosaicWM.git
+git clone https://github.com/CleoMenezesJr/MosaicWM.git
 cd MosaicWM
 
 # Install the extension
