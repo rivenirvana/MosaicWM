@@ -45,8 +45,8 @@ export const GRAB_OP_RESIZING_W  = 32769; // Left
 export const GRAB_OP_RESIZING_E  = 16385; // Right
 export const GRAB_OP_RESIZING_SW = 40961; // Bottom-Left
 export const GRAB_OP_RESIZING_S  = 61441; // Bottom (Guessing/Example) - wait, let's just list the ones we use
-// The ones used in code: 4097, 8193, 20481, 32769, 16385, 40961
-export const RESIZE_GRAB_OPS = [4097, 8193, 20481, 32769, 16385, 40961, 24577];
+// The ones used in code: 4097, 8193, 20481, 32769, 16385, 40961, 36865
+export const RESIZE_GRAB_OPS = [4097, 8193, 20481, 32769, 16385, 40961, 24577, 36865];
 
 export const GRAB_OP_MOVING = 1;
 export const GRAB_OP_KEYBOARD_MOVING = 1025;
