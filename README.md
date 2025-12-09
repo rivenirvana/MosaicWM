@@ -7,6 +7,9 @@ A GNOME Shell extension that provides automatic window tiling in a mosaic layout
 > [!WARNING]
 > **Experimental Extension**: This extension is under active development and may contain bugs or unexpected behavior. Use at your own risk. Please report any issues.
 
+> [!NOTE]
+> Developed for GNOME Shell 49. Tested only on this version.
+
 ## 💡 Philosophy
 
 Traditional window management forces users to manually position and resize windows. Mosaic WM takes a different approach:
@@ -32,21 +35,16 @@ This aligns with GNOME's philosophy of reducing cognitive load and letting users
 
 ### From Source
 
-> [!NOTE]
-> Requires `zip` command to be installed on your system.
-
 ```bash
 # Clone the repository
 git clone https://github.com/CleoMenezesJr/MosaicWM.git
 cd MosaicWM
 
 # Install the extension
-./install.sh
+./scripts/build.sh -i
 
-# Enable the extension
+# Log out and log back in, then enable
 gnome-extensions enable mosaicwm@cleomenezesjr.github.io
-
-# Log out and log back in
 ```
 
 ### Manual Installation
@@ -75,10 +73,10 @@ Once enabled, the extension works automatically:
 
 ```bash
 # Install the extension
-./install.sh
+./scripts/build.sh -i
 
 # Test in a nested GNOME Shell session
-./run-gnome-shell.sh
+./scripts/run-gnome-shell.sh
 ```
 
 ### Enable Debug Logging
