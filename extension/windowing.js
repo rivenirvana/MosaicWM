@@ -17,6 +17,7 @@ export class WindowingManager {
     constructor() {
         this._edgeTilingManager = null;
         this._animationsManager = null;
+        this._tilingManager = null;
     }
 
     setEdgeTilingManager(manager) {
@@ -25,6 +26,10 @@ export class WindowingManager {
 
     setAnimationsManager(manager) {
         this._animationsManager = manager;
+    }
+    
+    setTilingManager(manager) {
+        this._tilingManager = manager;
     }
 
     getTimestamp() {
@@ -159,45 +164,43 @@ export class WindowingManager {
 
     /**
      * Moves a window that doesn't fit into a new workspace.
+     * Creates a new workspace right after the current one.
      * Uses the injected AnimationsManager for move animations.
      * @param {Meta.Window} window The window to move
      * @returns {Meta.Workspace} The target workspace
      */
     moveOversizedWindow(window) {
-        let previous_workspace = window.get_workspace();
+        const previous_workspace = window.get_workspace();
         const workspaceManager = global.workspace_manager;
         const currentIndex = previous_workspace.index();
-        
-        let target_workspace = null;
-        let strategy = null;
-        
-        target_workspace = workspaceManager.append_new_workspace(false, this.getTimestamp());
-        
-        const newWorkspace = target_workspace;
         const insertPosition = currentIndex + 1;
+        
+        // Create new workspace at the end
+        const target_workspace = workspaceManager.append_new_workspace(false, this.getTimestamp());
+        
+        // IMMEDIATELY reorder to correct position BEFORE moving window
+        // This prevents race conditions with workspace-changed/window-added events
+        workspaceManager.reorder_workspace(target_workspace, insertPosition);
+        
         const switchFocusToMovedWindow = previous_workspace.active;
         const startRect = window.get_frame_rect();
         
-        strategy = `new workspace at position ${insertPosition}`;
-        Logger.log(`[MOSAIC WM] Created new workspace at position ${insertPosition}`);
-        Logger.log(`[MOSAIC WM] Moving overflow window ${window.get_id()} from workspace ${currentIndex} to ${target_workspace.index()} (strategy: ${strategy})`);
+        Logger.log(`[MOSAIC WM] Created workspace at position ${insertPosition}, moving window ${window.get_id()}`);
         
-        // Move window immediately to avoid race conditions
-        window.change_workspace(newWorkspace);
+        // Move window to the already-reordered workspace
+        window.change_workspace(target_workspace);
         
-        // Defer workspace reorder and activation
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+        // Defer only activation and animation
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             // Verify workspace still exists
-            const workspaceIndex = newWorkspace.index();
+            const workspaceIndex = target_workspace.index();
             if (workspaceIndex < 0 || workspaceIndex >= workspaceManager.get_n_workspaces()) {
                 Logger.warn(`[MOSAIC WM] Workspace no longer valid: ${workspaceIndex}`);
                 return GLib.SOURCE_REMOVE;
             }
             
-            workspaceManager.reorder_workspace(newWorkspace, insertPosition);
-            
             if (switchFocusToMovedWindow) {
-                newWorkspace.activate(global.get_current_time());
+                target_workspace.activate(global.get_current_time());
             }
             
             if (this._animationsManager) {
