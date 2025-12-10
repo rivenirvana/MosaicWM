@@ -3,6 +3,7 @@
 // Window management utilities and workspace operations
 
 import * as Logger from './logger.js';
+import * as constants from './constants.js';
 import Meta from 'gi://Meta';
 import GLib from 'gi://GLib';
 
@@ -260,8 +261,11 @@ export class WindowingManager {
                     attempts++;
                     const frame = window.get_frame_rect();
                     
-                    // Check if window has real dimensions (not 0x0)
-                    if (frame.width > 0 && frame.height > 0) {
+                    // Check if window has real dimensions (not 0x0) AND is in the workspace list
+                    const workspaceWindows = target_workspace.list_windows();
+                    const windowInWorkspace = workspaceWindows.some(w => w.get_id() === window.get_id());
+                    
+                    if (frame.width > 0 && frame.height > 0 && windowInWorkspace) {
                         Logger.log(`[MOSAIC WM] moveOversizedWindow: window geometry ready (${frame.width}x${frame.height}), retiling`);
                         this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
                         

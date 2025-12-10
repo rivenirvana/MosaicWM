@@ -995,6 +995,14 @@ export default class WindowMosaicExtension extends Extension {
                         return GLib.SOURCE_REMOVE;
                     }
                     
+                    // Skip fit check for windows moved by overflow - they should stay in their destination
+                    if (WINDOW._movedByOverflow) {
+                        Logger.log(`[MOSAIC WM] window-added: Skipping fit check - window was moved by overflow`);
+                        this._windowPreviousWorkspace.delete(WINDOW.get_id());
+                        this._windowRemovedTimestamp.delete(WINDOW.get_id());
+                        return GLib.SOURCE_REMOVE;
+                    }
+                    
                     const canFit = this.tilingManager.canFitWindow(WINDOW, WORKSPACE, MONITOR);
                     
                     if (!canFit) {
