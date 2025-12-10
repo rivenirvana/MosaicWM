@@ -46,6 +46,7 @@ export default class WindowMosaicExtension extends Extension {
         this._currentWorkspaceIndex = null;
         this._lastVisitedWorkspace = null;
         this._overflowInProgress = false;  // Flag to prevent empty workspace navigation during overflow
+        this._restoringFromEdgeTile = false;  // Flag to prevent overflow during edge tile restoration
         
         this._settingsOverrider = null;
         this._draggedWindow = null;
@@ -539,6 +540,13 @@ export default class WindowMosaicExtension extends Extension {
                     return;
                 }
                 
+                // Skip overflow detection during edge tile restoration
+                if (this._restoringFromEdgeTile) {
+                    Logger.log('[MOSAIC WM] Skipping overflow check - restoring from edge tile');
+                    this._sizeChanged = false;
+                    return;
+                }
+                
                 if (!canFit) {
                     if (this._resizeOverflowWindow !== window) {
                         Logger.log('[MOSAIC WM] Resize overflow detected (automatic) - moving window immediately');
@@ -593,8 +601,14 @@ export default class WindowMosaicExtension extends Extension {
                 Logger.log(`[MOSAIC WM] Edge tiling: window was in zone ${windowState.zone}, initializing _currentZone`);
                 
                 this._skipNextTiling = window.get_id();
+                this._restoringFromEdgeTile = true;
                 
                 this.edgeTilingManager.removeTile(window, () => {
+                    // Delay clearing the flag to cover the debounce period for overflow detection
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.EDGE_TILE_RESTORE_DELAY_MS, () => {
+                        this._restoringFromEdgeTile = false;
+                        return GLib.SOURCE_REMOVE;
+                    });
                     Logger.log(`[MOSAIC WM] Edge tiling: restoration complete, checking if drag still active`);
                     this._skipNextTiling = null;
                     this._currentZone = TileZone.NONE; // Reset so window doesn't get re-tiled on release
@@ -744,7 +758,13 @@ export default class WindowMosaicExtension extends Extension {
                     
                     if (wasInEdgeTiling) {
                         Logger.log(`[MOSAIC WM] Edge tiling: restoring window ${this._draggedWindow.get_id()} from tiled state, zone was ${windowState.zone}`);
+                        this._restoringFromEdgeTile = true;
                         this.edgeTilingManager.removeTile(this._draggedWindow);
+                        // Delay clearing the flag to cover the debounce period for overflow detection
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.EDGE_TILE_RESTORE_DELAY_MS, () => {
+                            this._restoringFromEdgeTile = false;
+                            return GLib.SOURCE_REMOVE;
+                        });
                     } else {
                         Logger.log(`[MOSAIC WM] Edge tiling: window was NOT in edge tile (preview only)`);
                     }
