@@ -18,6 +18,8 @@ export class WindowingManager {
         this._edgeTilingManager = null;
         this._animationsManager = null;
         this._tilingManager = null;
+        this._overflowStartCallback = null;
+        this._overflowEndCallback = null;
     }
 
     setEdgeTilingManager(manager) {
@@ -30,6 +32,11 @@ export class WindowingManager {
     
     setTilingManager(manager) {
         this._tilingManager = manager;
+    }
+    
+    setOverflowCallbacks(startCallback, endCallback) {
+        this._overflowStartCallback = startCallback;
+        this._overflowEndCallback = endCallback;
     }
 
     getTimestamp() {
@@ -172,6 +179,11 @@ export class WindowingManager {
         const workspaceManager = global.workspace_manager;
         const monitor = this.getPrimaryMonitor();
         
+        // Notify that overflow is starting
+        if (this._overflowStartCallback) {
+            this._overflowStartCallback();
+        }
+        
         // Set flag immediately to prevent other handlers from tiling with wrong dimensions
         window._movedByOverflow = true;
         
@@ -265,6 +277,11 @@ export class WindowingManager {
                                 this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
                             } else {
                                 Logger.log(`[MOSAIC WM] moveOversizedWindow: window correctly positioned, skipping retile`);
+                            }
+                            
+                            // Notify that overflow is complete
+                            if (this._overflowEndCallback) {
+                                this._overflowEndCallback();
                             }
                             return GLib.SOURCE_REMOVE;
                         });

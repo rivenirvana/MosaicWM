@@ -45,6 +45,7 @@ export default class WindowMosaicExtension extends Extension {
         this._overflowMoveTimestamps = new Map();  // Track windows recently moved due to overflow
         this._currentWorkspaceIndex = null;
         this._lastVisitedWorkspace = null;
+        this._overflowInProgress = false;  // Flag to prevent empty workspace navigation during overflow
         
         this._settingsOverrider = null;
         this._draggedWindow = null;
@@ -215,6 +216,11 @@ export default class WindowMosaicExtension extends Extension {
             const managedWindows = windows.filter(w => !this.windowingManager.isExcluded(w));
             
             if (managedWindows.length === 0) {
+                // Skip if overflow is in progress - window is being moved and will arrive soon
+                if (this._overflowInProgress) {
+                    Logger.log('[MOSAIC WM] Workspace is empty but overflow in progress - skipping navigation');
+                    return;
+                }
                 Logger.log('[MOSAIC WM] Workspace is empty - checking if should navigate');
                 
                 const workspaceManager = global.workspace_manager;
@@ -1068,6 +1074,10 @@ export default class WindowMosaicExtension extends Extension {
         this.windowingManager.setEdgeTilingManager(this.edgeTilingManager);
         this.windowingManager.setAnimationsManager(this.animationsManager);
         this.windowingManager.setTilingManager(this.tilingManager);
+        this.windowingManager.setOverflowCallbacks(
+            () => { this._overflowInProgress = true; },
+            () => { this._overflowInProgress = false; }
+        );
         
         this.tilingManager.setEdgeTilingManager(this.edgeTilingManager);
         this.tilingManager.setDrawingManager(this.drawingManager);
