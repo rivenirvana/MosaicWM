@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import * as Logger from './logger.js';
-import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import { Extension, InjectionManager } from 'resource:///org/gnome/shell/extensions/extension.js';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
 
 import { WindowingManager } from './windowing.js';
 import * as constants from './constants.js';
@@ -22,6 +23,59 @@ import { ReorderingManager } from './reordering.js';
 import { SwappingManager } from './swapping.js';
 import { DrawingManager } from './drawing.js';
 import { AnimationsManager } from './animations.js';
+
+// Custom LayoutStrategy for Overview that preserves mosaic window positions
+// Instead of reorganizing windows, it simply scales down the current layout
+class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
+    computeLayout(windows, _params) {
+        return { windows };
+    }
+
+    computeWindowSlots(layout, area) {
+        const clones = layout.windows;
+        if (clones.length === 0)
+            return [];
+
+        // Get bounding box of all windows
+        let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+        for (const clone of clones) {
+            const rect = clone.boundingBox;
+            minX = Math.min(minX, rect.x);
+            minY = Math.min(minY, rect.y);
+            maxX = Math.max(maxX, rect.x + rect.width);
+            maxY = Math.max(maxY, rect.y + rect.height);
+        }
+
+        const mosaicWidth = maxX - minX;
+        const mosaicHeight = maxY - minY;
+
+        // Calculate uniform scale to fit in overview area
+        const scale = Math.min(
+            area.width / mosaicWidth,
+            area.height / mosaicHeight,
+            1.0
+        );
+
+        // Center the scaled layout
+        const scaledWidth = mosaicWidth * scale;
+        const scaledHeight = mosaicHeight * scale;
+        const offsetX = (area.width - scaledWidth) / 2;
+        const offsetY = (area.height - scaledHeight) / 2;
+
+        // Return slots with preserved relative positions
+        const slots = [];
+        for (const clone of clones) {
+            const rect = clone.boundingBox;
+            const x = (rect.x - minX) * scale + area.x + offsetX;
+            const y = (rect.y - minY) * scale + area.y + offsetY;
+            const w = rect.width * scale;
+            const h = rect.height * scale;
+            slots.push([x, y, w, h, clone]);
+        }
+
+        return slots;
+    }
+}
 
 export default class WindowMosaicExtension extends Extension {
     constructor(metadata) {
@@ -63,6 +117,8 @@ export default class WindowMosaicExtension extends Extension {
         this.drawingManager = null;
         this.animationsManager = null;
         this.windowingManager = null;
+        
+        this._injectionManager = null;
     }
 
     _tileWindowWorkspace(meta_window) {
@@ -1922,6 +1978,18 @@ export default class WindowMosaicExtension extends Extension {
             this._settingsOverrider.add(mutterKeybindings, 'toggle-tiled-right', emptyArray);
         }
         
+        // Override Overview layout to preserve mosaic positions
+        this._injectionManager = new InjectionManager();
+        const layoutProto = Workspace.WorkspaceLayout.prototype;
+        this._injectionManager.overrideMethod(layoutProto, '_createBestLayout', () => {
+            return function () {
+                this._layoutStrategy = new MosaicLayoutStrategy({
+                    monitor: Main.layoutManager.monitors[this._monitorIndex],
+                });
+                return this._layoutStrategy.computeLayout(this._sortedWindows);
+            };
+        });
+        
         this._wmEventIds.push(global.window_manager.connect('size-change', this._sizeChangeHandler));
         this._wmEventIds.push(global.window_manager.connect('size-changed', this._sizeChangedHandler));
         this._displayEventIds.push(global.display.connect('window-created', this._windowCreatedHandler));
@@ -2087,6 +2155,11 @@ export default class WindowMosaicExtension extends Extension {
         if (this._settingsOverrider) {
             this._settingsOverrider.destroy();
             this._settingsOverrider = null;
+        }
+        
+        if (this._injectionManager) {
+            this._injectionManager.clear();
+            this._injectionManager = null;
         }
         
         Main.wm.removeKeybinding('tile-left');
