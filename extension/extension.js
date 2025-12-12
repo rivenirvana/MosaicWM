@@ -1000,6 +1000,14 @@ export default class WindowMosaicExtension extends Extension {
                     this.tilingManager.clearDragRemainingSpace();
                     this.edgeTilingManager.setEdgeTilingActive(false, null);
                     
+                    // CRITICAL: Restore opacity if window was marked as overflow
+                    if (this._dragOverflowWindow) {
+                        const overflowActor = this._dragOverflowWindow.get_compositor_private();
+                        if (overflowActor) overflowActor.opacity = 255;
+                        this.tilingManager.clearExcludedWindow();
+                        this._dragOverflowWindow = null;
+                    }
+                    
                     const draggedWindow = this._draggedWindow;
                     this._draggedWindow = null;
                     this._currentZone = TileZone.NONE;
