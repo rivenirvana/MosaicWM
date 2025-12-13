@@ -121,8 +121,9 @@ export default class WindowMosaicExtension extends Extension {
             Logger.log(`[MOSAIC WM] Window ${window.get_id()} opened maximized - marked for auto-tile check`);
         }
         
-        // Use GLib.timeout_add for better GJS integration than setInterval
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
+        // Defined as callback to be used by either first-frame signal or polling
+        const processWindowCallback = () => {
+            // Using a closure variable to track if we're inside the timeout loop already or called directly
             let monitor = window.get_monitor();
             let workspace = window.get_workspace();
                 
@@ -446,7 +447,19 @@ export default class WindowMosaicExtension extends Extension {
                 return GLib.SOURCE_REMOVE;
             }
             return GLib.SOURCE_CONTINUE;
-        });
+        };
+
+        const actor = window.get_compositor_private();
+        if (actor) {
+            const signalId = actor.connect('first-frame', () => {
+                actor.disconnect(signalId);
+                if (processWindowCallback() === GLib.SOURCE_CONTINUE) {
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, processWindowCallback);
+                }
+            });
+        } else {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, processWindowCallback);
+        }
     }
 
     _destroyedHandler = (_, win) => {
