@@ -24,6 +24,7 @@ import { SwappingManager } from './swapping.js';
 import { DrawingManager } from './drawing.js';
 import { AnimationsManager } from './animations.js';
 import { MosaicLayoutStrategy } from './overviewLayout.js';
+import { TimeoutRegistry, afterWorkspaceSwitch, afterAnimations } from './async.js';
 
 export default class WindowMosaicExtension extends Extension {
     constructor(metadata) {
@@ -67,6 +68,9 @@ export default class WindowMosaicExtension extends Extension {
         this.windowingManager = null;
         
         this._injectionManager = null;
+        
+        // Centralized timeout management for async operations
+        this._timeoutRegistry = new TimeoutRegistry();
     }
 
     _tileWindowWorkspace(meta_window) {
@@ -565,6 +569,12 @@ export default class WindowMosaicExtension extends Extension {
         }
         
         this._currentWorkspaceIndex = newIndex;
+        
+        // Wait for workspace switch animation to complete before any tiling operations
+        // This prevents race conditions where tiling starts while animation is still running
+        afterAnimations(this.animationsManager, () => {
+            Logger.log(`[MOSAIC WM] Workspace animation complete - ready for operations on workspace ${newIndex}`);
+        }, this._timeoutRegistry);
     }
 
     _windowWorkspaceChangedHandler = (window) => {
@@ -2109,6 +2119,11 @@ export default class WindowMosaicExtension extends Extension {
 
     disable() {
         Logger.log('[MOSAIC WM] Disabling extension');
+        
+        // Clear all managed timeouts first
+        if (this._timeoutRegistry) {
+            this._timeoutRegistry.clearAll();
+        }
         
         if (this._resizeDebounceTimeout) {
             GLib.source_remove(this._resizeDebounceTimeout);

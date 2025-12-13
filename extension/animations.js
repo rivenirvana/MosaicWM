@@ -30,6 +30,14 @@ export class AnimationsManager {
         return this._resizingWindowId;
     }
 
+    /**
+     * Returns true if any windows are currently animating
+     * Used by async utilities to wait for animations to complete
+     */
+    hasActiveAnimations() {
+        return this._animatingWindows.size > 0;
+    }
+
     setDragging(dragging) {
         // If ending drag, set flag for smooth drop animation
         if (this._isDragging && !dragging) {
