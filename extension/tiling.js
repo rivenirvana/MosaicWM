@@ -648,6 +648,19 @@ export class TilingManager {
         
         const y = (work_area.height - totalHeight) / 2 + work_area.y;
         
+        // Set targetX/targetY for each window in each level
+        let levelY = y;
+        for (const level of levels) {
+            level.y = levelY;
+            let xPos = level.x;
+            for (const w of level.windows) {
+                w.targetX = xPos;
+                w.targetY = levelY + (level.height - w.height) / 2; // Center vertically within row
+                xPos += w.width + spacing;
+            }
+            levelY += level.height + spacing;
+        }
+        
         return {
             x: work_area.x,
             y: y,
@@ -676,6 +689,15 @@ export class TilingManager {
         level.x = (work_area.width - totalWidth) / 2 + work_area.x;
         
         const y = (work_area.height - maxHeight) / 2 + work_area.y;
+        level.y = y;
+        
+        // Set targetX/targetY for each window
+        let xPos = level.x;
+        for (const w of level.windows) {
+            w.targetX = xPos;
+            w.targetY = y + (maxHeight - w.height) / 2; // Center vertically within row
+            xPos += w.width + spacing;
+        }
 
         return {
             x: work_area.x,
