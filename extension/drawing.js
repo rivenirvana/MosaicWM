@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Visual feedback and preview rendering
 import * as Logger from './logger.js';
-import st from 'gi://St';
-import * as main from 'resource:///org/gnome/shell/ui/main.js';
+import St from 'gi://St';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 export class DrawingManager {
     constructor() {
@@ -30,11 +30,11 @@ export class DrawingManager {
             box = this._boxPool.pop();
             box.show();
         } else {
-            box = new st.Widget({ 
+            box = new St.Widget({ 
                 style_class: "mosaic-preview",
                 opacity: 200 // Ensure it's visible
             });
-            main.uiGroup.add_child(box);
+            Main.uiGroup.add_child(box);
         }
         
         box.set_position(x, y);
@@ -65,11 +65,11 @@ export class DrawingManager {
         if (!rect) return;
         
         if (!this._tilePreview) {
-            this._tilePreview = new st.Widget({
+            this._tilePreview = new St.Widget({
                 style_class: 'tile-preview',
                 opacity: 128
             });
-            main.uiGroup.add_child(this._tilePreview);
+            Main.uiGroup.add_child(this._tilePreview);
         }
         
         this._tilePreview.set_position(rect.x, rect.y);
@@ -89,12 +89,12 @@ export class DrawingManager {
         // Clean up pool
         while(this._boxPool.length > 0) {
             let box = this._boxPool.pop();
-            main.uiGroup.remove_child(box);
+            Main.uiGroup.remove_child(box);
             box.destroy();
         }
         
         if (this._tilePreview) {
-            main.uiGroup.remove_child(this._tilePreview);
+            Main.uiGroup.remove_child(this._tilePreview);
             this._tilePreview.destroy();
             this._tilePreview = null;
         }
