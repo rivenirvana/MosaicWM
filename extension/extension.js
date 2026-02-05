@@ -2417,7 +2417,7 @@ export default class WindowMosaicExtension extends Extension {
         disconnectSignalMap(this._windowSizeSignals);
         
         if (this._workspaceChangeTimeout) {
-            clearTimeout(this._workspaceChangeTimeout);
+            GLib.source_remove(this._workspaceChangeTimeout);
             this._workspaceChangeTimeout = null;
         }
 
