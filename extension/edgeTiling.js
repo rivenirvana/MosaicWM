@@ -770,6 +770,12 @@ export class EdgeTilingManager {
                 }
                 
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.POLL_INTERVAL_MS, () => {
+                    // Safety check: ensure windows are still valid
+                    if (!window.get_compositor_private() || 
+                        !fullToQuarterConversion.window.get_compositor_private()) {
+                        return GLib.SOURCE_REMOVE;
+                    }
+
                     const actualConvertedFrame = fullToQuarterConversion.window.get_frame_rect();
                     const actualNewFrame = window.get_frame_rect();
                     
