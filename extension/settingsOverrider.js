@@ -36,22 +36,19 @@ export class SettingsOverrider {
     clear() {
         if (!this.#overrides) return;
 
-        // Reset to schema defaults (not saved values, which may already be our override)
+        // Restore original values (not schema defaults)
         for (const [schemaId, overrides] of this.#overrides) {
             try {
                 const settings = new Gio.Settings({ schema_id: schemaId });
                 
-                for (const [key, _] of overrides) {
+                for (const [key, originalValue] of overrides) {
                     try {
-                        settings.reset(key);
-                        Logger.log(`[MOSAIC WM] Reset ${schemaId}.${key} to schema default`);
+                        settings.set_value(key, originalValue);
+                        Logger.log(`[MOSAIC WM] Restored ${schemaId}.${key} to original value`);
                     } catch (e) {
-                        Logger.warn(`[MOSAIC WM] Failed to reset ${schemaId}.${key}: ${e.message}`);
+                        Logger.warn(`[MOSAIC WM] Failed to restore ${schemaId}.${key}: ${e.message}`);
                     }
                 }
-                
-                // Sync settings to ensure they're written
-                Gio.Settings.sync();
             } catch (e) {
                 Logger.warn(`[MOSAIC WM] Failed to create settings for ${schemaId}: ${e.message}`);
             }
