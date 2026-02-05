@@ -5,6 +5,7 @@
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
@@ -95,9 +96,21 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
             const isActive = i === activeIndex;
             
             const item = new PopupMenu.PopupSwitchMenuItem(
-                `Workspace ${i + 1}${isActive ? ' ●' : ''}`,
+                `Workspace ${i + 1}`,
                 isEnabled
             );
+            
+            // Create location pin icon for active workspace
+            const icon = new St.Icon({
+                gicon: _getIcon(this._extension, 'pin-location-symbolic'),
+                style_class: 'popup-menu-icon',
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            icon.visible = isActive;
+            
+            // Insert after label (label is usually index 1 after ornament)
+            item.insert_child_at_index(icon, 2);
+            item._locationIcon = icon;
             
             item._workspaceIndex = i;
             item.connect('toggled', (menuItem, state) => {
@@ -119,7 +132,10 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
         for (let i = 0; i < this._workspaceItems.length && i < nWorkspaces; i++) {
             const item = this._workspaceItems[i];
             const isActive = i === activeIndex;
-            item.label.text = `Workspace ${i + 1}${isActive ? ' ●' : ''}`;
+            
+            if (item._locationIcon) {
+                item._locationIcon.visible = isActive;
+            }
         }
         
         // Update indicator icon for current workspace
