@@ -63,6 +63,7 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
     
     _onGlobalToggle() {
         const enabled = this.checked;
+        const nWorkspaces = this._workspaceManager.get_n_workspaces();
         Logger.log(`[MOSAIC WM] Quick Settings: Global toggle ${enabled ? 'ON' : 'OFF'}`);
         
         // Update icon
@@ -70,10 +71,15 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
         
         if (enabled) {
             // Enable mosaic on all workspaces
-            this._extension._disabledWorkspaces.clear();
+            // For WeakMap, we iterate all workspaces and ensure they are NOT in the map (or false)
+            for (let i = 0; i < nWorkspaces; i++) {
+                const workspace = this._workspaceManager.get_workspace_by_index(i);
+                if (workspace) {
+                    this._extension._disabledWorkspaceStates.delete(workspace);
+                }
+            }
             
             // Re-tile all workspaces (monitor detection is automatic)
-            const nWorkspaces = this._workspaceManager.get_n_workspaces();
             for (let i = 0; i < nWorkspaces; i++) {
                 const workspace = this._workspaceManager.get_workspace_by_index(i);
                 if (workspace) {
@@ -83,9 +89,11 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
             }
         } else {
             // Disable mosaic on all workspaces
-            const nWorkspaces = this._workspaceManager.get_n_workspaces();
             for (let i = 0; i < nWorkspaces; i++) {
-                this._extension._disabledWorkspaces.add(i);
+                const workspace = this._workspaceManager.get_workspace_by_index(i);
+                if (workspace) {
+                    this._extension._disabledWorkspaceStates.set(workspace, true);
+                }
             }
         }
         
@@ -102,7 +110,8 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
         const activeIndex = this._workspaceManager.get_active_workspace_index();
         
         for (let i = 0; i < nWorkspaces; i++) {
-            const isEnabled = !this._extension._disabledWorkspaces.has(i);
+            const workspace = this._workspaceManager.get_workspace_by_index(i);
+            const isEnabled = workspace ? !this._extension._disabledWorkspaceStates.get(workspace) : true;
             const isActive = i === activeIndex;
             
             const item = new PopupMenu.PopupSwitchMenuItem(
@@ -154,10 +163,13 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
     _onWorkspaceToggle(workspaceIndex, enabled) {
         Logger.log(`[MOSAIC WM] Quick Settings: Workspace ${workspaceIndex + 1} mosaic ${enabled ? 'ON' : 'OFF'}`);
         
-        if (enabled) {
-            this._extension._disabledWorkspaces.delete(workspaceIndex);
-        } else {
-            this._extension._disabledWorkspaces.add(workspaceIndex);
+        const workspace = this._workspaceManager.get_workspace_by_index(workspaceIndex);
+        if (workspace) {
+            if (enabled) {
+                this._extension._disabledWorkspaceStates.delete(workspace);
+            } else {
+                this._extension._disabledWorkspaceStates.set(workspace, true);
+            }
         }
         
         this._updateGlobalToggleState();
@@ -176,7 +188,17 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
     
     _updateGlobalToggleState() {
         // Global toggle is ON if any workspace has mosaic enabled
-        const anyEnabled = this._extension._disabledWorkspaces.size < this._workspaceManager.get_n_workspaces();
+        const nWorkspaces = this._workspaceManager.get_n_workspaces();
+        let anyEnabled = false;
+        
+        for (let i = 0; i < nWorkspaces; i++) {
+            const workspace = this._workspaceManager.get_workspace_by_index(i);
+            if (workspace && !this._extension._disabledWorkspaceStates.get(workspace)) {
+                anyEnabled = true;
+                break;
+            }
+        }
+        
         this.checked = anyEnabled;
         this.gicon = _getIcon(this._extension, anyEnabled ? 'mosaic-on-symbolic' : 'mosaic-off-symbolic');
     }
@@ -225,7 +247,8 @@ class MosaicIndicator extends QuickSettings.SystemIndicator {
     
     _updateIcon() {
         const activeIndex = this._workspaceManager.get_active_workspace_index();
-        const isEnabled = !this._extension._disabledWorkspaces.has(activeIndex);
+        const workspace = this._workspaceManager.get_workspace_by_index(activeIndex);
+        const isEnabled = workspace ? !this._extension._disabledWorkspaceStates.get(workspace) : true;
         this._indicator.gicon = _getIcon(this._extension, isEnabled ? 'mosaic-on-symbolic' : 'mosaic-off-symbolic');
     }
     

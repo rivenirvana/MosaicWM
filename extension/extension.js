@@ -50,11 +50,6 @@ export default class WindowMosaicExtension extends Extension {
         this._workspaceEventIds = [];
         this._sizeChanged = false;
         
-        // Per-workspace mosaic toggle (volatile, not persisted)
-        this._disabledWorkspaces = new Set();
-        
-        this._resizeOverflowWindow = null;
-        this._resizeInOverflow = false;
         this._resizeDebounceTimeout = null;
         this._resizeGracePeriod = 0;
         this._tileTimeout = null;
@@ -93,13 +88,21 @@ export default class WindowMosaicExtension extends Extension {
         
         // Centralized timeout management for async operations
         this._timeoutRegistry = new TimeoutRegistry();
+        
+        // Track disabled state per workspace object (persistence across reordering)
+        // Key: Meta.Workspace, Value: true (if disabled)
+        // Default (missing key): Enabled
+        this._disabledWorkspaceStates = new WeakMap();
+
+        this._resizeOverflowWindow = null;
+        this._resizeInOverflow = false;
     }
     
     // Check if mosaic is enabled for a given workspace
     isMosaicEnabledForWorkspace(workspace) {
         if (!workspace) return true;
-        const index = workspace.index();
-        return !this._disabledWorkspaces.has(index);
+        // If explicitly set to true in WeakMap, it is disabled. Otherwise enabled.
+        return !this._disabledWorkspaceStates.get(workspace);
     }
     
     // Update the indicator icon based on current workspace state
@@ -1146,7 +1149,7 @@ export default class WindowMosaicExtension extends Extension {
                     Logger.log(`[MOSAIC WM] DnD swap result = ${success}`);
                     
                     if (success) {
-                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RETILE_DELAY_MS, () => {
                             this._skipNextTiling = null;
                             return GLib.SOURCE_REMOVE;
                         });
@@ -1168,7 +1171,7 @@ export default class WindowMosaicExtension extends Extension {
                             this.dragHandler.moveGhostWindowsToOverflow();
                         }
                         
-                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RETILE_DELAY_MS, () => {
                             this._skipNextTiling = null;
                             return GLib.SOURCE_REMOVE;
                         });
@@ -1367,9 +1370,9 @@ export default class WindowMosaicExtension extends Extension {
                                                 const deltaY = winCenterY - centerY;
                                                 
                                                 if (Math.abs(deltaX) >= Math.abs(deltaY)) {
-                                                    offsetX = deltaX > 10 ? OFFSET : (deltaX < -10 ? -OFFSET : 0);
+                                                    offsetX = deltaX > constants.ANIMATION_DIFF_THRESHOLD ? OFFSET : (deltaX < -constants.ANIMATION_DIFF_THRESHOLD ? -OFFSET : 0);
                                                 } else {
-                                                    offsetY = deltaY > 10 ? OFFSET : (deltaY < -10 ? -OFFSET : 0);
+                                                    offsetY = deltaY > constants.ANIMATION_DIFF_THRESHOLD ? OFFSET : (deltaY < -constants.ANIMATION_DIFF_THRESHOLD ? -OFFSET : 0);
                                                 }
                                             }
                                         } 
@@ -1872,7 +1875,7 @@ export default class WindowMosaicExtension extends Extension {
                         }
                         
                         // Clear protection after delay to allow resizes to settle
-                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RETILE_DELAY_MS, () => {
                             // Only clear if NOT managed by _windowAdded polling loop 
                             // (checked via _smartResizeProcessedWindows existing for this window)
                             let p = _smartResizeProcessedWindows.get(WORKSPACE);
@@ -1976,7 +1979,7 @@ export default class WindowMosaicExtension extends Extension {
                 
                 if (restored) {
                     // Delay retile to let the resize command be applied by Mutter
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RESIZE_SETTLE_DELAY_MS, () => {
                         Logger.log('[MOSAIC WM] Retiling after restore delay');
                         this.tilingManager.tileWorkspaceWindows(WORKSPACE, null, MONITOR, true);
                         return GLib.SOURCE_REMOVE;
@@ -1985,9 +1988,6 @@ export default class WindowMosaicExtension extends Extension {
                     // No restoration, retile immediately
                     this.tilingManager.tileWorkspaceWindows(WORKSPACE, null, MONITOR, true);
                 }
-            } else if (remainingWindows.length > 0) {
-                // Just retile without restore for overflow moves
-                this.tilingManager.tileWorkspaceWindows(WORKSPACE, null, MONITOR, true);
             } else {
                 // Workspace is now empty of mosaic windows
                 // Check if there are ANY related windows (including edge-tiled) before navigating
