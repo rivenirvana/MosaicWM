@@ -42,6 +42,7 @@ export const EDGE_TILE_RESTORE_DELAY_MS = 300;  // Delay to prevent false overfl
 export const GEOMETRY_WAIT_MAX_ATTEMPTS = 40;   // Max attempts to wait for window geometry (40 * 50ms = 2s)
 export const REVERSE_RESIZE_PROTECTION_MS = 200; // Protection window for reverse smart resize
 export const RESIZE_VERIFICATION_DELAY_MS = 1500; // Delay for resize verification checks
+export const RESIZE_SETTLE_DELAY_MS = 150;       // Delay to let Mutter apply resize before retiling
 export const ISRESIZING_FLAG_RESET_MS = 2;       // Delay to reset isResizing flag
 export const MIN_AVAILABLE_SPACE_PX = 50;        // Minimum available space threshold for smart resize
 
