@@ -219,9 +219,10 @@ export default class WindowMosaicExtension extends Extension {
                 Logger.log(`[TRACE] NEW WINDOW: canFit=${canFit}, movedByOverflow=${WindowState.get(window, 'movedByOverflow')}`);
                 
                 if(!canFit && !WindowState.get(window, 'movedByOverflow')) {
+
                     // Enqueue to prevent race conditions when multiple windows open
                     this.tilingManager.enqueueWindowOpen(window.get_id(), () => {
-                        Logger.log('[MOSAIC WM] Window doesn\'t fit - trying smart resize first');
+                        Logger.log('[MOSAIC WM] Window doesn\'t fit - checks delegated to waitForGeometry loop');
                         
                         // Try smart resize before overflow - use edge-tiling-aware work area
                         let workArea = workspace.get_work_area_for_monitor(monitor);
@@ -259,6 +260,15 @@ export default class WindowMosaicExtension extends Extension {
                                 // Use a small timeout to give Mutter time to process resize
                                 // before tileWorkspaceWindows reads the new frame_rect sizes
                                 Logger.log('[MOSAIC WM] Smart resize applied - waiting for resize to propagate');
+                                
+                                // RACE CONDITION FIX: Register window immediately so waitForGeometry knows it's being handled
+                                let p = _smartResizeProcessedWindows.get(workspace);
+                                if (!p) {
+                                    p = new Set();
+                                    _smartResizeProcessedWindows.set(workspace, p);
+                                }
+                                p.add(window.get_id());
+                                
                                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.POLL_INTERVAL_MS, () => {
                                     this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
                                     return GLib.SOURCE_REMOVE;
@@ -268,9 +278,23 @@ export default class WindowMosaicExtension extends Extension {
                         }
 
                         
-                        Logger.log('[MOSAIC WM] No smart resize possible - moving to new workspace');
-                        Logger.log('[TRACE] OVERFLOW from: No smart resize possible');
-                        this.windowingManager.moveOversizedWindow(window);
+                        Logger.log('[MOSAIC WM] No smart resize possible - checking if we should expel');
+                        
+                        // User Request: Only expel if caused by edge tiling constraints. 
+                        let hasEdgeTiles = false;
+                        if (this.edgeTilingManager) {
+                            const et = this.edgeTilingManager.getEdgeTiledWindows(workspace, monitor);
+                            hasEdgeTiles = et && et.length > 0;
+                        }
+                        
+                        if (hasEdgeTiles) {
+                            Logger.log('[MOSAIC WM] Edge tiling constraints detected - moving to new workspace');
+                            Logger.log('[TRACE] OVERFLOW from: No smart resize possible (Edge Tiling)');
+                            this.windowingManager.moveOversizedWindow(window);
+                        } else {
+                            Logger.log('[MOSAIC WM] Pure Mosaic mode - forcing tile despite overflow');
+                            this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
+                        }
                     });
                 } else if (WindowState.get(window, 'movedByOverflow')) {
                     // Skip tiling here - let the delayed retile in moveOversizedWindow handle it
@@ -425,6 +449,7 @@ export default class WindowMosaicExtension extends Extension {
                 
                 if (shouldNavigate && targetWorkspace) {
                     targetWorkspace.activate(global.get_current_time());
+                    this.windowingManager.showWorkspaceSwitcher(targetWorkspace, targetWorkspace.get_active_monitor());
                     Logger.log(`[MOSAIC WM] Navigated to workspace ${targetWorkspace.index()}`);
                 } else {
                     Logger.log('[MOSAIC WM] No non-empty workspace available to navigate to');
@@ -580,10 +605,27 @@ export default class WindowMosaicExtension extends Extension {
                         }, this._timeoutRegistry);
                     }, this._timeoutRegistry);
                 } else {
-                    Logger.log('[MOSAIC WM] DnD arrival: Smart Resize failed - moving to new workspace');
-                    Logger.log('[TRACE] OVERFLOW from: DnD Smart Resize failed');
-                    WindowState.set(window, 'overflowMoveTimestamp', Date.now());
-                    this.windowingManager.moveOversizedWindow(window);
+                    Logger.log('[MOSAIC WM] DnD arrival: Smart Resize failed - checking if we should expel');
+                    
+                    let hasEdgeTiles = false;
+                    if (this.edgeTilingManager) {
+                         const et = this.edgeTilingManager.getEdgeTiledWindows(currentWorkspace, monitor);
+                         hasEdgeTiles = et && et.length > 0;
+                    }
+                    
+                    if (hasEdgeTiles) {
+                        Logger.log('[MOSAIC WM] DnD arrival: Edge tiling detected - moving to new workspace');
+                        Logger.log('[TRACE] OVERFLOW from: DnD Smart Resize failed (Edge Tiling)');
+                        WindowState.set(window, 'overflowMoveTimestamp', Date.now());
+                        this.windowingManager.moveOversizedWindow(window);
+                    } else {
+                        Logger.log('[MOSAIC WM] DnD arrival: Pure Mosaic mode - forcing tile');
+                        afterWorkspaceSwitch(() => {
+                            afterAnimations(this.animationsManager, () => {
+                                this.tilingManager.tileWorkspaceWindows(currentWorkspace, window, monitor, false);
+                            }, this._timeoutRegistry);
+                        }, this._timeoutRegistry);
+                    }
                 }
             } else {
                 Logger.log('[MOSAIC WM] Manual move: window fits - tiling workspace');
@@ -1490,6 +1532,7 @@ export default class WindowMosaicExtension extends Extension {
                         // ACTIVATE destination workspace and EXIT Overview
                         Logger.log(`[MOSAIC WM] DnD: Activating workspace ${WORKSPACE.index()} and exiting Overview`);
                         WORKSPACE.activate(global.get_current_time());
+                        this.windowingManager.showWorkspaceSwitcher(WORKSPACE, MONITOR);
                         
                         // Mark as DnD arrival - will trigger expansion after tiling
                         WindowState.set(WINDOW, 'arrivedFromDnD', true);
@@ -1662,6 +1705,7 @@ export default class WindowMosaicExtension extends Extension {
                             
                             if (hasMaximized) {
                                 Logger.log('[MOSAIC WM] waitForGeometry: Sacred Maximized window detected - forcing overflow');
+                                WindowState.set(WINDOW, 'isSmartResizing', false);
                                 this.windowingManager.moveOversizedWindow(WINDOW);
                                 return GLib.SOURCE_REMOVE;
                             }
@@ -1781,7 +1825,8 @@ export default class WindowMosaicExtension extends Extension {
                                         const availableForNew = workArea.width - existingTotalWidth - spacing;
                                         if (availableForNew <= constants.MIN_AVAILABLE_SPACE_PX) {
                                             // Defer overflow check while smart resize creates space (geometry may be stale)
-                                            if (WindowState.get(WINDOW, 'isSmartResizing')) {
+                                            // BUT only if we haven't reached max attempts - prevents infinite overlap loop
+                                            if (WindowState.get(WINDOW, 'isSmartResizing') && attempts < constants.PRE_FIT_MAX_ATTEMPTS) {
                                                 Logger.log(`[MOSAIC WM] PRE-FIT: Smart resize in progress - ignoring current space ${availableForNew}px and waiting`);
                                                 return GLib.SOURCE_CONTINUE;
                                             }
@@ -1817,6 +1862,12 @@ export default class WindowMosaicExtension extends Extension {
                                             return GLib.SOURCE_REMOVE;
                                         }
                                         
+                                        // CRITICAL: If smart resize is no longer active (e.g. timeout elsewhere), stop polling
+                                        if (!WindowState.get(WINDOW, 'isSmartResizing')) {
+                                            Logger.log(`[MOSAIC WM] PRE-FIT: Smart resize flag cleared externally - stopping poll`);
+                                            return GLib.SOURCE_REMOVE;
+                                        }
+                                        
                                         return GLib.SOURCE_CONTINUE;
                                     };
                                     
@@ -1828,6 +1879,7 @@ export default class WindowMosaicExtension extends Extension {
                                     // Restore opacity before overflow
                                     const actorImm = WINDOW.get_compositor_private();
                                     if (actorImm) actorImm.opacity = 255;
+                                    WindowState.set(WINDOW, 'isSmartResizing', false);
                                     this.windowingManager.moveOversizedWindow(WINDOW);
                                     return GLib.SOURCE_REMOVE;
                                 }
@@ -2019,7 +2071,7 @@ export default class WindowMosaicExtension extends Extension {
                         return GLib.SOURCE_REMOVE;
                     }
                     Logger.log('[MOSAIC WM] _windowRemoved: Workspace truly empty, navigating away');
-                    this.windowingManager.renavigate(WORKSPACE, WORKSPACE.active, this._lastVisitedWorkspace);
+                    this.windowingManager.renavigate(WORKSPACE, WORKSPACE.active, this._lastVisitedWorkspace, MONITOR);
                 }
             }
             

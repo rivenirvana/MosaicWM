@@ -119,11 +119,6 @@ export class EdgeTilingManager {
         return false;
     }
 
-    // Kept for backward compatibility
-    _hasEdgeTiledWindows(workspace, side) {
-        return this._hasEdgeTiledWindowsOnSide(workspace, side, null);
-    }
-
     // cachedEdgeTiledIds: optional array of window IDs to avoid list_windows() call
     detectZone(cursorX, cursorY, workArea, workspace, cachedEdgeTiledIds = null) {
         const threshold = constants.EDGE_TILING_THRESHOLD;
@@ -1003,6 +998,7 @@ export class EdgeTilingManager {
             });
             
             newWorkspace.activate(global.get_current_time());
+            this._windowingManager.showWorkspaceSwitcher(newWorkspace, monitor);
             return;
         }
         
@@ -1041,8 +1037,10 @@ export class EdgeTilingManager {
             remainingSpace
         );
         
+        Logger.log(`[MOSAIC WM] _handleMosaicOverflow: Checking ${mosaicWindows.length} windows in ${remainingSpace.width}x${remainingSpace.height}. Overflow: ${testTileInfo.overflow}`);
+        
         if (testTileInfo.overflow) {
-            Logger.log(`[MOSAIC WM] Mosaic overflow detected - moving ${mosaicWindows.length} windows to new workspace`);
+            Logger.log(`[MOSAIC WM] Mosaic overflow detected - moving entire mosaic pack (${mosaicWindows.length} windows) to new workspace`);
             const workspaceManager = global.workspace_manager;
             const newWorkspace = workspaceManager.append_new_workspace(false, global.get_current_time());
             
@@ -1058,6 +1056,7 @@ export class EdgeTilingManager {
             });
             
             newWorkspace.activate(global.get_current_time());
+            this._windowingManager.showWorkspaceSwitcher(newWorkspace, monitor);
         }
     }
 
