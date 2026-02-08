@@ -103,9 +103,8 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             return this._computeDefaultSlots(filteredClones, area);
         }
 
-        // --- STABLE SCALING (Viewport Mirror) ---
-        // Instead of scaling based on the bounding box of windows (which is unstable),
-        // we scale based on the real Monitor Work Area. This ensures 1:1 spatial memory.
+        // --- VIEWPORT MIRROR ---
+        // Mirror the Desktop 1:1 using the Monitor Work Area as reference.
         const monitorIndex = this._monitor.index;
         const workArea = workspace.get_work_area_for_monitor(monitorIndex);
 
@@ -113,18 +112,16 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             return this._computeDefaultSlots(filteredClones, area);
         }
 
-        // Calculate uniform scale based on Work Area
-        const scale = Math.min(
-            area.width / workArea.width,
-            area.height / workArea.height,
-            1.0
-        );
+        // Calculate uniform scale to fit workArea into area (letterboxing)
+        const scaleX = area.width / workArea.width;
+        const scaleY = area.height / workArea.height;
+        const scale = Math.min(scaleX, scaleY, 1.0);
 
-        // Center the "mirror" within the overview slot
-        const scaledWidth = workArea.width * scale;
-        const scaledHeight = workArea.height * scale;
-        const offsetX = (area.width - scaledWidth) / 2;
-        const offsetY = (area.height - scaledHeight) / 2;
+        // Center the "mirrored" desktop within the overview slot
+        const offsetX = (area.width - (workArea.width * scale)) / 2;
+        const offsetY = (area.height - (workArea.height * scale)) / 2;
+
+        Logger.log(`Mirror Math: area=${area.width}x${area.height}, monitor[${monitorIndex}]=${workArea.width}x${workArea.height}, scale=${scale.toFixed(4)}, offset=(${offsetX.toFixed(1)}, ${offsetY.toFixed(1)})`);
 
         // Return layout slots
         const slots = [];
