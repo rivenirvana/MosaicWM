@@ -38,6 +38,21 @@ export class WindowHandler {
             WindowState.set(window, 'aboveSignalId', aboveSignalId);
             Logger.log(`[MOSAIC WM] Connected notify::above signal for window ${window.get_id()}`);
         }
+
+        // Maximize state change (Unmaximize detection)
+        if (!WindowState.has(window, 'maximizedHSignalId')) {
+            const maxHSignalId = window.connect('notify::maximized-horizontally', () => {
+                this.handleMaximizeChange(window);
+            });
+            WindowState.set(window, 'maximizedHSignalId', maxHSignalId);
+        }
+
+        if (!WindowState.has(window, 'maximizedVSignalId')) {
+            const maxVSignalId = window.connect('notify::maximized-vertically', () => {
+                this.handleMaximizeChange(window);
+            });
+            WindowState.set(window, 'maximizedVSignalId', maxVSignalId);
+        }
         
         // Sticky (on-all-workspaces) state change
         if (!WindowState.has(window, 'stickySignalId')) {
@@ -58,6 +73,39 @@ export class WindowHandler {
         if (!WindowState.has(window, 'sizeSignalId')) {
             const sizeSignalId = window.connect('size-changed', () => {
                 ComputedLayouts.delete(window.get_id());
+                
+                // Trigger retile on size change if not currently being managed by Mosaic/User
+                // This handles windows that grow after initial creation
+                if (!WindowState.get(window, 'isSmartResizing') && 
+                    !WindowState.get(window, 'isReverseSmartResizing') &&
+                    !this._ext._resizeDebounceTimeout) {
+                    
+                    if (!this._sizeChangeTimeouts) this._sizeChangeTimeouts = new Map();
+                    const windowId = window.get_id();
+                    
+                    if (this._sizeChangeTimeouts.has(windowId)) {
+                        GLib.source_remove(this._sizeChangeTimeouts.get(windowId));
+                    }
+                    
+                    const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+                        this._sizeChangeTimeouts.delete(windowId);
+                        const workspace = window.get_workspace();
+                        const monitor = window.get_monitor();
+                        if (workspace && monitor >= 0) {
+                            Logger.log(`[MOSAIC WM] size-changed: Triggering retile for window ${windowId} due to external resize`);
+                            // Mark as forced overflow to bypass "new window" checks in tiling.js
+                            WindowState.set(window, 'forceOverflow', true);
+                            this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
+                            // Clear flag after a short delay
+                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+                                WindowState.set(window, 'forceOverflow', false);
+                                return GLib.SOURCE_REMOVE;
+                            });
+                        }
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    this._sizeChangeTimeouts.set(windowId, timeoutId);
+                }
             });
             WindowState.set(window, 'sizeSignalId', sizeSignalId);
         }
@@ -103,6 +151,19 @@ export class WindowHandler {
         if (aboveSignalId) {
             window.disconnect(aboveSignalId);
             WindowState.remove(window, 'aboveSignalId');
+        }
+
+        // Disconnect maximize signals
+        const maxHSignalId = WindowState.get(window, 'maximizedHSignalId');
+        if (maxHSignalId) {
+            window.disconnect(maxHSignalId);
+            WindowState.remove(window, 'maximizedHSignalId');
+        }
+
+        const maxVSignalId = WindowState.get(window, 'maximizedVSignalId');
+        if (maxVSignalId) {
+            window.disconnect(maxVSignalId);
+            WindowState.remove(window, 'maximizedVSignalId');
         }
         
         // Disconnect sticky signal
@@ -227,6 +288,29 @@ export class WindowHandler {
                     this.windowingManager.moveOversizedWindow(window);
                 }
                 
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    }
+
+    // Handle maximize/unmaximize transitions
+    handleMaximizeChange(window) {
+        const hMax = window.maximized_horizontally;
+        const vMax = window.maximized_vertically;
+        const windowId = window.get_id();
+
+        // If BOTH are false, it means we just unmaximized (or at least one dimension unmaximized implies a state change we care about for tiling)
+        // Usually unmaximize clears both. 
+        if (!hMax && !vMax) {
+            Logger.log(`[MOSAIC WM] Window ${windowId} unmaximized - forcing retile`);
+            
+            // We need a small delay because Mutter logic might still be updating the frame
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                const workspace = window.get_workspace();
+                const monitor = window.get_monitor();
+                if (workspace && monitor >= 0) {
+                     this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
+                }
                 return GLib.SOURCE_REMOVE;
             });
         }

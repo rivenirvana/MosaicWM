@@ -1,23 +1,19 @@
-// Copyright 2025 Cleo Menezes Jr.
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Debug logging utilities
-
 const DEBUG = true;
 
 export function log(...args) {
     if (DEBUG) {
-        console.log(...args);
+        console.log('[MOSAIC INFO]', ...args);
     }
 }
 
 export function info(...args) {
-    console.log(...args);
+    console.log('[MOSAIC INFO]', ...args);
 }
 
 export function error(...args) {
-    console.error(...args);
+    console.error('[MOSAIC ERROR]', ...args);
 }
 
 export function warn(...args) {
-    console.warn(...args);
+    console.warn('[MOSAIC WARN]', ...args);
 }

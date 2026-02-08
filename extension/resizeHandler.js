@@ -60,6 +60,7 @@ export class ResizeHandler {
         const oldWorkspace = currentWorkspace;
         window.change_workspace(targetWorkspace);
         targetWorkspace.activate(global.get_current_time());
+        this.windowingManager.showWorkspaceSwitcher(targetWorkspace, monitor);
         
         // Tile both workspaces after switch
         afterWorkspaceSwitch(() => {

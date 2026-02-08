@@ -4,16 +4,23 @@
 
 import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
 import { ComputedLayouts } from './tiling.js';
+import * as Logger from './logger.js';
 import { getTilingManager } from './extension.js';
 
 // Scales down the layout instead of reorganizing windows (preserves spatial memory)
 export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
+    constructor(props) {
+        super(props);
+        this._calculating = false;
+    }
+
     computeLayout(windows, _params) {
         return { windows };
     }
 
     computeWindowSlots(layout, area) {
         const clones = layout.windows;
+        
         if (clones.length === 0)
             return [];
 
@@ -33,17 +40,43 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             return true;
         });
         
+        // Safety check: If we filtered everything, but input wasn't empty, 
+        // it might be better to show *something* rather than nothing?
+        // For now, let's respect the filter (attached dialogs really shouldn't be shown separately)
         if (filteredClones.length === 0)
             return [];
 
         // Check cache completeness
         let allCached = this._isCacheComplete(filteredClones);
-        
-        // If cache incomplete, try to populate it
-        if (!allCached) {
-            const tilingManager = getTilingManager();
-            if (tilingManager) {
-                tilingManager.calculateLayoutsOnly();
+
+        // If cache incomplete, try to populate it during layout computation
+        // Use a flag to prevent infinite recursion if calculateLayoutsOnly triggers a relayout
+        if (!allCached && !this._calculating) {
+            this._calculating = true;
+            try {
+                const tilingManager = getTilingManager();
+                if (tilingManager) {
+                    // Determine workspace from the first clone that has a metaWindow
+                    let workspace = null;
+                    for (const clone of filteredClones) {
+                        const mw = clone.metaWindow || clone.source?.metaWindow;
+                        if (mw) {
+                            workspace = mw.get_workspace();
+                            break;
+                        }
+                    }
+                    
+                    if (workspace) {
+                        tilingManager.calculateLayoutsOnly(workspace, this._monitor.index);
+                    } else {
+                         // Fallback if no workspace found (shouldn't happen if there are clones)
+                         tilingManager.calculateLayoutsOnly(null, this._monitor.index);
+                    }
+                }
+            } catch (e) {
+                Logger.error(`[MOSAIC WM] Overview: Error calculating layouts: ${e.message}`, e);
+            } finally {
+                this._calculating = false;
             }
             
             // Re-check after population attempt
@@ -120,9 +153,22 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
             
             if (winId !== null) {
                 const cached = ComputedLayouts.get(winId);
-                if (!cached || cached.width <= 0 || cached.height <= 0) {
+                // Strict check: Must exists AND have finite positive dimensions
+                // Note: (NaN <= 0) is false, so we must use isFinite/isNaN checks
+                if (!cached || 
+                    !Number.isFinite(cached.x) || 
+                    !Number.isFinite(cached.y) || 
+                    !Number.isFinite(cached.width) || 
+                    !Number.isFinite(cached.height) || 
+                    cached.width <= 0 || 
+                    cached.height <= 0) {
                     return false;
                 }
+            } else {
+                // If we have a clone without a metaWindow, we can't use the mosaic layout
+                // (because we can't look up its position in ComputedLayouts)
+                // So we must report incomplete cache to force fallback to default layout
+                return false;
             }
         }
         return true;
@@ -130,51 +176,63 @@ export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {
     
     // Fallback: Simple centered layout (similar to GNOME's default)
     _computeDefaultSlots(clones, area) {
-        const slots = [];
-        const padding = 20;
-        const maxScale = 0.7;
-        
-        // Simple grid-like arrangement
-        const count = clones.length;
-        const cols = Math.ceil(Math.sqrt(count));
-        const rows = Math.ceil(count / cols);
-        
-        const cellWidth = (area.width - padding * (cols + 1)) / cols;
-        const cellHeight = (area.height - padding * (rows + 1)) / rows;
-        
-        for (let i = 0; i < clones.length; i++) {
-            const clone = clones[i];
-            const col = i % cols;
-            const row = Math.floor(i / cols);
+        try {
+            const slots = [];
+            const padding = 20;
+            const maxScale = 0.7;
             
-            // Use metaWindow frame_rect if available (excludes attached dialogs)
-            // Otherwise fall back to clone's boundingBox
-            const metaWindow = clone.metaWindow || clone.source?.metaWindow;
-            let winWidth, winHeight;
+            // Simple grid-like arrangement
+            const count = clones.length;
+            const cols = Math.ceil(Math.sqrt(count));
+            const rows = Math.ceil(count / cols);
             
-            if (metaWindow) {
-                const frameRect = metaWindow.get_frame_rect();
-                winWidth = frameRect.width > 0 ? frameRect.width : 300;
-                winHeight = frameRect.height > 0 ? frameRect.height : 200;
-            } else {
-                const bbox = clone.boundingBox;
-                winWidth = bbox.width > 0 ? bbox.width : 300;
-                winHeight = bbox.height > 0 ? bbox.height : 200;
+            const cellWidth = (area.width - padding * (cols + 1)) / cols;
+            const cellHeight = (area.height - padding * (rows + 1)) / rows;
+            
+            for (let i = 0; i < clones.length; i++) {
+                const clone = clones[i];
+                const col = i % cols;
+                const row = Math.floor(i / cols);
+                
+                // Use metaWindow frame_rect if available (excludes attached dialogs)
+                // Otherwise fall back to clone's boundingBox
+                const metaWindow = clone.metaWindow || clone.source?.metaWindow;
+                let winWidth = 300, winHeight = 200;
+                
+                if (metaWindow) {
+                    try {
+                        const frameRect = metaWindow.get_frame_rect();
+                        winWidth = frameRect.width > 0 ? frameRect.width : 300;
+                        winHeight = frameRect.height > 0 ? frameRect.height : 200;
+                    } catch (e) {
+                         // ignore
+                    }
+                } else if (clone.boundingBox) {
+                    const bbox = clone.boundingBox;
+                    winWidth = bbox.width > 0 ? bbox.width : 300;
+                    winHeight = bbox.height > 0 ? bbox.height : 200;
+                } else if (clone.width > 0 && clone.height > 0) {
+                     winWidth = clone.width;
+                     winHeight = clone.height;
+                }
+                
+                const scale = Math.min(cellWidth / winWidth, cellHeight / winHeight, maxScale);
+                const w = winWidth * scale;
+                const h = winHeight * scale;
+                
+                const cellX = area.x + padding + col * (cellWidth + padding);
+                const cellY = area.y + padding + row * (cellHeight + padding);
+                
+                const x = cellX + (cellWidth - w) / 2;
+                const y = cellY + (cellHeight - h) / 2;
+                
+                slots.push([x, y, w, h, clone]);
             }
             
-            const scale = Math.min(cellWidth / winWidth, cellHeight / winHeight, maxScale);
-            const w = winWidth * scale;
-            const h = winHeight * scale;
-            
-            const cellX = area.x + padding + col * (cellWidth + padding);
-            const cellY = area.y + padding + row * (cellHeight + padding);
-            
-            const x = cellX + (cellWidth - w) / 2;
-            const y = cellY + (cellHeight - h) / 2;
-            
-            slots.push([x, y, w, h, clone]);
+            return slots;
+        } catch (e) {
+            Logger.error(`[MOSAIC WM] Overview: _computeDefaultSlots failed: ${e.message}`);
+            return [];
         }
-        
-        return slots;
     }
 }
