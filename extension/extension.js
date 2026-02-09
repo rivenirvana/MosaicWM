@@ -2013,7 +2013,6 @@ export default class WindowMosaicExtension extends Extension {
         const removedFrame = window.get_frame_rect();
         const freedWidth = removedFrame.width;
         const freedHeight = removedFrame.height;
-        
         // Only clear opening size if window is actually being destroyed (not moved)
         // Check if window still has an actor (destroyed windows don't)
         const actor = window.get_compositor_private();
@@ -2185,12 +2184,52 @@ export default class WindowMosaicExtension extends Extension {
         // Override Overview layout to preserve mosaic positions
         this._injectionManager = new InjectionManager();
         const layoutProto = Workspace.WorkspaceLayout.prototype;
-        this._injectionManager.overrideMethod(layoutProto, '_createBestLayout', () => {
-            return function () {
+        this._injectionManager.overrideMethod(layoutProto, '_createBestLayout', originalMethod => {
+            const extension = this;
+            return function (...args) {
+                // Determine workspace from the windows in this layout
+                let workspace = null;
+                for (const win of this._sortedWindows) {
+                    const mw = win.metaWindow || win.source?.metaWindow;
+                    if (mw) {
+                        workspace = mw.get_workspace();
+                        if (workspace) break;
+                    }
+                }
+
+                const isEnabled = workspace ? !extension._disabledWorkspaceStates.get(workspace) : true;
+                
+                // Determine if we should use Mosaic or Fallback to Native
+                let useMosaic = isEnabled;
+                if (isEnabled) {
+                    for (const win of this._sortedWindows) {
+                        const mw = win.metaWindow || win.source?.metaWindow;
+                        if (!mw) continue;
+                        
+                        // Fallback to Native GNOME layout if there are "floating" windows
+                        // according to the user's request (Above, Sticky, or Maximized)
+                        if (mw.is_above() || mw.is_on_all_workspaces() || 
+                            (mw.maximized_horizontally && mw.maximized_vertically)) {
+                            useMosaic = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Literal Fallback: use native GNOME strategy if not strictly mosaic
+                if (!useMosaic) {
+                    if (isEnabled) {
+                         Logger.log(`[MOSAIC WM] Overview: Fallback to NATIVE (floating window detected)`);
+                    }
+                    this._layoutStrategy = null;
+                    return originalMethod.apply(this, args);
+                }
+
+                Logger.log(`[MOSAIC WM] Overview: Using MOSAIC Strategy for monitor ${this._monitorIndex}`);
                 this._layoutStrategy = new MosaicLayoutStrategy({
                     monitor: Main.layoutManager.monitors[this._monitorIndex],
                 });
-                return this._layoutStrategy.computeLayout(this._sortedWindows);
+                return this._layoutStrategy.computeLayout(this._sortedWindows, ...args);
             };
         });
         
