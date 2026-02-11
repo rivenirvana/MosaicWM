@@ -8,18 +8,8 @@ import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as animations from './animations.js';
 import * as constants from './constants.js';
+import { TileZone } from './constants.js';
 import * as WindowState from './windowState.js';
-
-export const TileZone = {
-    NONE: 0,
-    LEFT_FULL: 1,
-    RIGHT_FULL: 2,
-    TOP_LEFT: 3,
-    TOP_RIGHT: 4,
-    BOTTOM_LEFT: 5,
-    BOTTOM_RIGHT: 6,
-    FULLSCREEN: 7
-};
 
 export class EdgeTilingManager {
     constructor() {
