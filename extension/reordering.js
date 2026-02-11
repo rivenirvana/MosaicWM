@@ -3,7 +3,7 @@
 // Window reordering via drag and drop
 
 import * as Logger from './logger.js';
-import { TileZone } from './edgeTiling.js';
+import { TileZone } from './constants.js';
 
 export class ReorderingManager {
     constructor() {
@@ -205,9 +205,6 @@ export class ReorderingManager {
             windows: descriptorsCopy
         };
         
-        this._boundPositionHandler = this._onPositionChanged.bind(this);
-        this._positionChangedId = meta_window.connect('position-changed', this._boundPositionHandler);
-        
         this._paused = false; // Ensure paused state is reset on start
         this._onPositionChanged();
     }
@@ -221,15 +218,6 @@ export class ReorderingManager {
         this._rejectedSwap = null;
         this._lastTileState = null;
         
-        if (this._positionChangedId && this._dragContext?.meta_window) {
-            try {
-                this._dragContext.meta_window.disconnect(this._positionChangedId);
-            } catch (e) {
-                // Window may have been destroyed
-            }
-            this._positionChangedId = 0;
-        }
-        this._boundPositionHandler = null;
         this._dragContext = null;
         
         if (this._animationsManager) {

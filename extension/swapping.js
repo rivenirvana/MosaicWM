@@ -3,20 +3,15 @@
 // Window swapping logic
 
 import * as Logger from './logger.js';
-import { TileZone } from './edgeTiling.js';
+import { TileZone } from './constants.js';
 import * as WindowState from './windowState.js';
 
 export class SwappingManager {
     constructor() {
         this._tilingManager = null;
         this._edgeTilingManager = null;
-        this._edgeTilingManager = null;
     }
     
-    // Import WindowState dynamically to avoid circular dependency issues if needed,
-    // but typically it's better to pass it or import if safe.
-    // Assuming WindowState is available via global or import.
-    // Since this file imports Logger, let's assume imports work.
 
     setTilingManager(manager) {
         this._tilingManager = manager;

@@ -12,6 +12,17 @@ export const TILE_INTERVAL_MS = 60000 * 5; // 5 minutes
 
 export const WINDOW_VALIDITY_CHECK_INTERVAL_MS = 10;
 
+export const TileZone = {
+    NONE: 0,
+    LEFT_FULL: 1,
+    RIGHT_FULL: 2,
+    TOP_LEFT: 3,
+    TOP_RIGHT: 4,
+    BOTTOM_LEFT: 5,
+    BOTTOM_RIGHT: 6,
+    FULLSCREEN: 7
+};
+
 export const STARTUP_TILE_DELAY_MS = 300;
 
 export const ANIMATION_DURATION_MS = 350;
@@ -41,7 +52,7 @@ export const GEOMETRY_CHECK_DELAY_MS = 10;
 export const SAFETY_TIMEOUT_BUFFER_MS = 100;
 export const EDGE_TILE_RESTORE_DELAY_MS = 300;  // Delay to prevent false overflow during edge tile restoration
 export const GEOMETRY_WAIT_MAX_ATTEMPTS = 40;   // Max attempts to wait for window geometry (40 * 50ms = 2s)
-export const REVERSE_RESIZE_PROTECTION_MS = 200; // Protection window for reverse smart resize
+export const REVERSE_RESIZE_PROTECTION_MS = 500; // Protection window for reverse smart resize/unmaximize
 export const RESIZE_VERIFICATION_DELAY_MS = 1500; // Delay for resize verification checks
 export const RESIZE_SETTLE_DELAY_MS = 150;       // Delay to let Mutter apply resize before retiling
 export const ISRESIZING_FLAG_RESET_MS = 2;       // Delay to reset isResizing flag

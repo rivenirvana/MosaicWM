@@ -11,7 +11,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as WorkspaceSwitcherPopup from 'resource:///org/gnome/shell/ui/workspaceSwitcherPopup.js';
 import { afterWorkspaceSwitch } from './timing.js';
 
-import { TileZone } from './edgeTiling.js';
+import { TileZone } from './constants.js';
 import * as WindowState from './windowState.js';
 
 const BLACKLISTED_WM_CLASSES = [
@@ -364,6 +364,11 @@ export class WindowingManager {
         }
         
         return false;
+    }
+
+    isExcludedByID(id) {
+        const window = global.display.list_all_windows().find(w => w.get_id() === id);
+        return window ? this.isExcluded(window) : true;
     }
 
     isRelated(meta_window) {
