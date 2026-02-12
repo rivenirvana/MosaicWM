@@ -1719,7 +1719,6 @@ export const TilingManager = GObject.registerClass({
         Logger.log(`[MOSAIC WM] tryFitWithResize: Binary search range [${lo.toFixed(3)}, 1.0]`);
         
         // 4. Binary search for optimal shrink ratio
-        //    8 iterations gives ~0.2% precision
         let hi = 1.0;
         let bestRatio = null;
         

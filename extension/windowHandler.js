@@ -107,6 +107,7 @@ export const WindowHandler = GObject.registerClass({
                             for (const w of wsWindows) {
                                 WindowState.set(w, 'targetSmartResizeSize', null);
                                 WindowState.set(w, 'isSmartResizing', false);
+                                
                                 const addedTime = WindowState.get(w, 'addedTime') || 0;
                                 if (addedTime > newestTime) {
                                     newestTime = addedTime;
@@ -505,13 +506,11 @@ export const WindowHandler = GObject.registerClass({
                                 WindowState.remove(window, 'openedMaximized');
                             } else {
                                 Logger.log('[MOSAIC WM] Opened maximized without tiled window - moving to new workspace');
-                                Logger.log('[TRACE] OVERFLOW from: Opened maximized without tiled window');
                                 this.windowingManager.moveOversizedWindow(window);
                                 WindowState.remove(window, 'openedMaximized');
                             }
                         } else {
                             Logger.log('[MOSAIC WM] User maximized window - moving to new workspace');
-                            Logger.log('[TRACE] OVERFLOW from: User maximized window');
                             this.windowingManager.moveOversizedWindow(window);
                         }
                         return GLib.SOURCE_REMOVE;
@@ -1026,7 +1025,7 @@ export const WindowHandler = GObject.registerClass({
                     afterWorkspaceSwitch(() => {
                         afterAnimations(this.animationsManager, () => {
                             WindowState.set(window, 'isSmartResizing', true);
-                            this._pollForFit(window, currentWorkspace, monitor, existingWindows, workArea);
+                            this._waitForFit(window, currentWorkspace, monitor, existingWindows, workArea);
                         }, this._timeoutRegistry);
                     }, this._timeoutRegistry);
                 } else {
