@@ -108,11 +108,15 @@ export const ResizeHandler = GObject.registerClass({
             let workspace = window.get_workspace();
             let monitor = window.get_monitor();
 
-            if (mode === 2 || mode === 0) { // Maximized
+            // Modes: 0=MAXIMIZE, 1=UNMAXIMIZE, 2=FULLSCREEN (Mutter/Wayland uses this mode value)
+            if (mode === 2 || mode === 0) {
+                // LOCK: Set flag to block onSizeChanged from saving giant dimensions
+                WindowState.set(window, 'isEnteringSacred', true);
+                
                 if (this.windowingManager.isMaximizedOrFullscreen(window) && 
                     this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor).length > 1) {
                     
-                    Logger.log('[MOSAIC WM] User maximized window - moving to new workspace');
+                    Logger.log('[MOSAIC WM] User entering sacred state - moving to new workspace');
                     const originalWorkspaceIndex = workspace.index();
                     const preMaxSize = WindowState.get(window, 'preferredSize') || WindowState.get(window, 'openingSize');
                     
@@ -128,6 +132,7 @@ export const ResizeHandler = GObject.registerClass({
                     }
                 }
             } else if (mode === 1) { // Unmaximized
+                WindowState.set(window, 'unmaximizing', true);
                 const maxInfo = WindowState.get(window, 'maximizedUndoInfo');
                 if (maxInfo) {
                     Logger.log(`[MOSAIC WM] Window ${window.get_id()} was unmaximized - attempting undo`);
@@ -151,6 +156,49 @@ export const ResizeHandler = GObject.registerClass({
                 return;
             }
 
+            // STATE MACHINE STAGE 2: Deferred Move Completion
+            const originWorkspaceIndex = WindowState.get(window, 'isRestoringSacred');
+            if (originWorkspaceIndex !== undefined) {
+                // If the window is no longer sacred (maximized or fullscreen), it has finished resizing in place.
+                if (!this.windowingManager.isMaximizedOrFullscreen(window)) {
+                    Logger.log(`[MOSAIC WM] Window ${window.get_id()} finished in-place resize. Moving to origin workspace ${originWorkspaceIndex}.`);
+                    
+                    const workspaceManager = global.workspace_manager;
+                    if (originWorkspaceIndex >= 0 && originWorkspaceIndex < workspaceManager.get_n_workspaces()) {
+                        const originWS = workspaceManager.get_workspace_by_index(originWorkspaceIndex);
+                        const monitor = window.get_monitor();
+                        
+                        // MOVE ATOMICALLY
+                        window.change_workspace(originWS);
+                        originWS.activate(global.get_current_time());
+                        this.windowingManager.showWorkspaceSwitcher(originWS, monitor);
+                        
+                        // CLEAR FLAGS IMMEDIATELY to prevent double-move
+                        WindowState.remove(window, 'isRestoringSacred');
+                        
+                        // TILE IN DESTINATION
+                        afterWorkspaceSwitch(() => {
+                            Logger.log(`[MOSAIC WM] Triggering tiling in destination workspace ${originWorkspaceIndex}`);
+                            this.tilingManager.tileWorkspaceWindows(originWS, window, monitor);
+                            
+                            // Clear unmaximizing flags after a settle period
+                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RESIZE_SETTLE_DELAY_MS, () => {
+                                WindowState.remove(window, 'unmaximizing');
+                                WindowState.remove(window, 'targetRestoredSize');
+                                return GLib.SOURCE_REMOVE;
+                            });
+                        }, this._timeoutRegistry);
+                        
+                        this._sizeChanged = false;
+                        return;
+                    }
+                }
+                
+                // If it's still sacred, but moving, we must block saves
+                this._sizeChanged = false;
+                return;
+            }
+
             if (this.windowingManager.isMaximizedOrFullscreen(window)) {
                 this._sizeChanged = false;
                 return;
@@ -169,7 +217,27 @@ export const ResizeHandler = GObject.registerClass({
             const isConstrained = WindowState.get(window, 'isConstrainedByMosaic');
             const isManualResizeAction = this._currentGrabOp && constants.RESIZE_GRAB_OPS.includes(this._currentGrabOp);
             
-            if (!isConstrained || isManualResizeAction) {
+            if (isManualResizeAction || !isConstrained) {
+                // CRITICAL: Mode-Based Signal Lock. 
+                // Abort if we are transitioning to/from sacred states.
+                if (WindowState.get(window, 'isEnteringSacred') || 
+                    WindowState.get(window, 'unmaximizing') ||
+                    WindowState.get(window, 'isRestoringSacred')) {
+                    Logger.log(`[MOSAIC WM] onSizeChanged: Save blocked by transition flag for ${window.get_id()} (EnteringSacred: ${WindowState.get(window, 'isEnteringSacred')}, Unmaximizing: ${WindowState.get(window, 'unmaximizing')})`);
+                    
+                    // ALWAYS clear isEnteringSacred after it has served its purpose (blocking the first resize)
+                    WindowState.remove(window, 'isEnteringSacred');
+                    
+                    this._sizeChanged = false;
+                    return;
+                }
+
+                if (this.windowingManager.isMaximizedOrFullscreen(window)) {
+                    Logger.warn(`[MOSAIC WM] onSizeChanged: SAVE ATTEMPTED WHILE SACRED for ${window.get_id()} - this shouldn't happen outside transition!`);
+                    this._sizeChanged = false;
+                    return;
+                }
+
                 const currentPreferredSize = WindowState.get(window, 'preferredSize');
                 if (currentPreferredSize) {
                     const widthDiff = Math.abs(rect.width - currentPreferredSize.width);
@@ -182,6 +250,9 @@ export const ResizeHandler = GObject.registerClass({
                     }
                 }
             }
+            
+            // Mode-Based Lock Cleanup
+            WindowState.remove(window, 'isEnteringSacred');
             
             if (this._skipNextTiling === window.get_id()) return;
 
