@@ -1229,10 +1229,7 @@ export const TilingManager = GObject.registerClass({
             return { overflow, layout: this._cachedTileResult?.windows || null };
         }
 
-        // Don't expel windows when edge-tiled windows exist (reduced space is intentional)
-        // EXCEPTION: if reference_meta_window itself is NOT edge-tiled, allow overflow for it
-        // The "both sides" case is handled above with explicit workspace move
-        // Also don't expel during drag - wait for confirmation
+        // Block expulsion if edge-tiled (except non-edge ref); defer if dragging.
         const hasEdgeTiledWindows = edgeTiledWindows && edgeTiledWindows.length > 0;
         const referenceIsEdgeTiled = reference_meta_window && 
             edgeTiledWindows?.some(s => s.window.get_id() === reference_meta_window.get_id());
@@ -1244,10 +1241,30 @@ export const TilingManager = GObject.registerClass({
             const addedTime = WindowState.get(reference_meta_window, 'addedTime');
             const isNewlyAdded = addedTime && (Date.now() - addedTime) < 2000;
             
-            if (!isNewlyAdded && !WindowState.get(reference_meta_window, 'forceOverflow')) {
+            if (!isNewlyAdded && !WindowState.get(reference_meta_window, 'forceOverflow') && !WindowState.get(reference_meta_window, 'isRestoringSacred')) {
                 Logger.log(`[MOSAIC WM] Skipping overflow for ${reference_meta_window.get_id()} - not a new window`);
-            } else if (WindowState.get(reference_meta_window, 'isSmartResizing')) {
-                Logger.log(`[MOSAIC WM] Skipping overflow for ${reference_meta_window.get_id()} - smart resize in progress`);
+            } else if (WindowState.get(reference_meta_window, 'isSmartResizing') || WindowState.get(reference_meta_window, 'isRestoringSacred')) {
+                Logger.log(`[MOSAIC WM] Skipping overflow for ${reference_meta_window.get_id()} - smart resize/sacred restore in progress`);
+                
+                // FORCE RESIZE ATTEMPT IF NEEDED
+                // If it's a sacred return, we MUST try to fit it, even if it means squishing everyone.
+                if (WindowState.get(reference_meta_window, 'isRestoringSacred')) {
+                     const workArea = this._getWorkArea(workspace, monitor);
+                     const existingWindows = windows.filter(w => w.id !== reference_meta_window.get_id()).map(w => w.window); // Need MetaWindows
+                     // We need actual MetaWindows for tryFit, but 'windows' here are descriptors.
+                     // Re-fetch real windows.
+                     const realExisting = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor)
+                                          .filter(w => w.get_id() !== reference_meta_window.get_id() && !this._windowingManager.isExcluded(w));
+                                          
+                     // Only try resize if we haven't already (to avoid loops)
+                     if (!WindowState.get(reference_meta_window, 'isSmartResizing')) {
+                         Logger.log(`[MOSAIC WM] Triggering Smart Resize for returning sacred window`);
+                         if (this.tryFitWithResize(reference_meta_window, realExisting, workArea)) {
+                             Logger.log(`[MOSAIC WM] Sacred window fitted with resize!`);
+                             return { overflow: false, layout: null }; // Return early to let resize happen
+                         }
+                     }
+                }
             } else {
                 let id = reference_meta_window.get_id();
                 let _windows = windows;
@@ -1401,14 +1418,56 @@ export const TilingManager = GObject.registerClass({
             newWindowDescriptor.height = realHeight;
             
             windows.push(newWindowDescriptor);
-        } else {
-            Logger.log('[MOSAIC WM] canFitWindow: Window already in workspace - checking current layout');
         }
         
-        // _tile() is the single source of truth — no artificial padding
-        const tile_result = this._tile(windows, availableSpace, true);
+        if (windowAlreadyInWorkspace) {
+            Logger.log(`[MOSAIC WM] canFitWindow: Window already in workspace - checking current layout`);
+            // Update descriptor size to match reality or override
+            const existingDescriptor = windows.find(w => w.id === newWindowId);
+            if (existingDescriptor) {
+                 if (overrideSize) {
+                     existingDescriptor.width = overrideSize.width;
+                     existingDescriptor.height = overrideSize.height;
+                 } else {
+                     // Ensure we use the best available size info
+                     const preferred = WindowState.get(window, 'preferredSize');
+                     const isMaximized = window.maximized_horizontally && window.maximized_vertically;
+                     if (preferred && !window.is_fullscreen() && !isMaximized) {
+                         existingDescriptor.width = preferred.width;
+                         existingDescriptor.height = preferred.height;
+                     }
+                 }
+            }
+        }
         
-        return !tile_result.overflow;
+        // Temporarily add new descriptor if it wasn't there (for simulation)
+        // ... (existing logic handles this via windows array)
+        
+        // Try to tile with these windows
+        const layout = this._tile(windows, availableSpace, relaxed);
+        return !layout.overflow;
+    }
+
+    // Restore a window's size to its preferred/original dimensions
+    restorePreferredSize(window) {
+        if (!window) return;
+        
+        const preferredSize = WindowState.get(window, 'preferredSize') || 
+                              WindowState.get(window, 'openingSize') ||
+                              WindowState.get(window, 'learnedMinSize');
+                              
+        if (preferredSize) {
+            Logger.log(`[MOSAIC WM] restorePreferredSize: Restoring window ${window.get_id()} to ${preferredSize.width}x${preferredSize.height}`);
+            const frame = window.get_frame_rect();
+            window.move_resize_frame(true, frame.x, frame.y, preferredSize.width, preferredSize.height);
+            
+            // Clear constraint flags
+            WindowState.set(window, 'isConstrainedByMosaic', false);
+            WindowState.set(window, 'isSmartResizing', false);
+            WindowState.set(window, 'targetSmartResizeSize', null);
+        } else {
+            Logger.log(`[MOSAIC WM] restorePreferredSize: No preferred size found for ${window.get_id()}`);
+        }
     }
 
      // Save original size of a window before resizing
@@ -1424,16 +1483,38 @@ export const TilingManager = GObject.registerClass({
     // This is the TARGET size the window wants to be
      
     savePreferredSize(window) {
-        // CRITICAL: Never save maximized/fullscreen dimensions as preferred!
-        if (this._windowingManager.isMaximizedOrFullscreen(window)) {
-            Logger.log(`[MOSAIC WM] savePreferredSize: Ignoring maximized window ${window.get_id()}`);
-            return;
-        }
+        let size = null;
         
-        const frame = window.get_frame_rect(); // Use frame rect for consistent tiling coordinates
-        if (frame.width > 0 && frame.height > 0) {
-            WindowState.set(window, 'preferredSize', { width: frame.width, height: frame.height });
-            Logger.log(`[MOSAIC WM] savePreferredSize: Window ${window.get_id()} preferred size updated to ${frame.width}x${frame.height}`);
+        // Use frame rect if window is NOT maximized/fullscreen
+        if (!this._windowingManager.isMaximizedOrFullscreen(window)) {
+            const frame = window.get_frame_rect();
+            size = { width: frame.width, height: frame.height };
+        } else {
+            // If currently maximized/fullscreen, we attempt to get the underlying "saved" size
+            // provided by Mutter. This is the size the window will return to.
+            try {
+                const saved = window.get_saved_rect();
+                if (saved && saved.width > 0 && saved.height > 0) {
+                    size = { width: saved.width, height: saved.height };
+                    Logger.log(`[MOSAIC WM] savePreferredSize: Captured saved_rect ${size.width}x${size.height} for sacred window ${window.get_id()}`);
+                }
+            } catch (e) {
+                Logger.warn(`[MOSAIC WM] savePreferredSize: Failed to get_saved_rect: ${e.message}`);
+            }
+        }
+                               
+        if (size && size.width > 0 && size.height > 0) {
+            // Signal-Based Lock: If onSizeChange just flagged this window as entering a sacred state,
+            // we do NOT save the size, as it's almost certainly the giant transition frame.
+            if (WindowState.get(window, 'isEnteringSacred')) {
+                Logger.log(`[MOSAIC WM] savePreferredSize: Save blocked by sacred transition flag for ${window.get_id()}`);
+                return;
+            }
+
+            WindowState.set(window, 'preferredSize', size);
+            Logger.log(`[MOSAIC WM] savePreferredSize: Window ${window.get_id()} target size updated to ${size.width}x${size.height}`);
+        } else {
+            Logger.log(`[MOSAIC WM] savePreferredSize: Could not determine valid preferred size for ${window.get_id()}`);
         }
     }
     

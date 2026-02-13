@@ -71,9 +71,30 @@ export const WindowHandler = GObject.registerClass({
         
         // Immediate unmaximize detection
         ids.push(window.connect('notify::maximized-horizontally', (win) => {
+            // Check strictly for unmaximized state (not fullscreen)
             if (!this.windowingManager.isMaximizedOrFullscreen(win)) {
-                Logger.log(`[MOSAIC WM] Window ${win.get_id()} unmaximized - retiling`);
-                this.onWindowUnmaximized(win);
+                Logger.log(`[MOSAIC WM] Window ${win.get_id()} unmaximized - starting state machine`);
+                this.handleSacredExit(win);
+            }
+        }));
+
+        // Detect Fullscreen changes
+        ids.push(window.connect('notify::fullscreen', (win) => {
+            if (!win.is_fullscreen()) {
+                Logger.log(`[MOSAIC WM] Window ${win.get_id()} exited fullscreen - starting state machine`);
+                this.handleSacredExit(win);
+            } else {
+                 // Entered Fullscreen: Move to new workspace if current is occupied.
+                 const workspace = win.get_workspace();
+                 const monitor = win.get_monitor();
+                 const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
+                 
+                 if (workspaceWindows.length > 1) {
+                     Logger.log(`[MOSAIC WM] Window ${win.get_id()} entered FULLSCREEN in occupied workspace - isolating (SACRED)`);
+                     // Save origin for restoration later
+                     WindowState.set(win, 'sacredOriginWorkspace', workspace.index());
+                     this.windowingManager.moveOversizedWindow(win);
+                 }
             }
         }));
         
@@ -94,9 +115,7 @@ export const WindowHandler = GObject.registerClass({
                         });
                         Logger.log(`[MOSAIC WM] Learned min size for ${win.get_id()}: ${actual.width}x${actual.height} (requested ${target.width}x${target.height})`);
                         
-                        // A window couldn't shrink as requested — the layout is invalid.
-                        // Clear ALL targetSmartResizeSize overrides so WindowDescriptor uses
-                        // actual frame dimensions, then retile with overflow enabled.
+                        // Smart Resize failed: clear overrides and retile with overflow enabled.
                         const ws = win.get_workspace();
                         const mon = win.get_monitor();
                         if (ws) {
@@ -115,8 +134,7 @@ export const WindowHandler = GObject.registerClass({
                                 }
                             }
                             
-                            // Retile with newest window as reference — overflow will fire
-                            // if the layout doesn't fit with actual frame dimensions
+                            // Retile with actual dimensions; triggers overflow if needed.
                             if (newestWindow) {
                                 Logger.log(`[MOSAIC WM] Smart resize minimum hit — retiling with overflow for ${newestWindow.get_id()}`);
                                 WindowState.set(newestWindow, 'forceOverflow', true);
@@ -169,6 +187,29 @@ export const WindowHandler = GObject.registerClass({
         WindowState.remove(window, 'previousExclusionState');
         WindowState.remove(window, 'previousWorkspace');
     }
+
+    // State Machine: Defer move until window has finished resizing in place.
+    handleSacredExit(window) {
+        const originIndex = WindowState.get(window, 'sacredOriginWorkspace');
+        
+        // Always set these flags to prevent giant dimensions during the in-place resize
+        const preferredSize = WindowState.get(window, 'preferredSize') || WindowState.get(window, 'openingSize');
+        if (preferredSize) {
+            WindowState.set(window, 'targetRestoredSize', { width: preferredSize.width, height: preferredSize.height });
+            WindowState.set(window, 'unmaximizing', true);
+        }
+
+        if (originIndex !== undefined) {
+            Logger.log(`[MOSAIC WM] Sacred exit detected for ${window.get_id()}. Flagging for deferred move to WS ${originIndex}.`);
+            WindowState.set(window, 'isRestoringSacred', originIndex);
+            
+            // Re-tile the current workspace immediately (it's leaving this spot)
+            const workspace = window.get_workspace();
+            const monitor = window.get_monitor();
+            this.tilingManager.tileWorkspaceWindows(workspace, null, monitor);
+        }
+    }
+
 
     // Handle window unmaximize event.
     onWindowUnmaximized(window) {
@@ -367,7 +408,7 @@ export const WindowHandler = GObject.registerClass({
             if (WindowState.get(win, 'deferTilingUntilOverviewHidden')) {
                 Logger.log(`[MOSAIC WM] Overview hidden: Tiling deferred window ${win.get_id()}`);
                 WindowState.remove(win, 'deferTilingUntilOverviewHidden');
-                this.tilingManager.tileWorkspaceWindows(workspace, win, monitor, false);
+                this._ensureWindowFits(win, workspace, monitor);
             }
         }
     }
@@ -413,8 +454,11 @@ export const WindowHandler = GObject.registerClass({
         }
 
         // Path 2: Fitting Check & Smart Resize
-        const canFit = this.tilingManager.canFitWindow(window, workspace, monitor);
-        Logger.log(`[TRACE] ensureWindowFits: canFit=${canFit}, id=${window.get_id()}`);
+        // CRITICAL: Check fit using the TARGET size if we are in a restoration flow.
+        // This prevents immediate overflow ejection when the frame is still transiently giant.
+        const targetSize = WindowState.get(window, 'targetRestoredSize');
+        const canFit = this.tilingManager.canFitWindow(window, workspace, monitor, targetSize);
+        Logger.log(`[TRACE] ensureWindowFits: canFit=${canFit}, id=${window.get_id()} (usingTargetSize: ${!!targetSize})`);
 
         if (canFit) {
             this.tilingManager.enqueueWindowOpen(window.get_id(), () => {
@@ -482,9 +526,24 @@ export const WindowHandler = GObject.registerClass({
                     return GLib.SOURCE_REMOVE; 
                 }
                 
-                // CRITICAL: Save preferred size before any tiling/resize logic
-                this.tilingManager.savePreferredSize(window);
+                // CRITICAL: Use saved_rect for natural size (get_frame_rect matches monitor if Maximized).
+                if (this.windowingManager.isMaximizedOrFullscreen(window)) {
+                    try {
+                         const saved = window.get_saved_rect();
+                         if (saved && saved.width > 0 && saved.height > 0) {
+                             WindowState.set(window, 'openingSize', { width: saved.width, height: saved.height });
+                             Logger.log(`[MOSAIC WM] onWindowCreated: Captured openingSize fallback from saved_rect: ${saved.width}x${saved.height}`);
+                         }
+                    } catch (e) {
+                         Logger.warn(`[MOSAIC WM] onWindowCreated: Failed to capture saved_rect: ${e.message}`);
+                    }
+                } else {
+                    // ONLY save preferred size if the window is NOT maximized/fullscreen upon creation.
+                    // This prevents capturing "almost-maximized" frames during the opening animation.
+                    this.tilingManager.savePreferredSize(window);
+                }
                 
+                // Unified Sacred Logic: Auto-tile in occupied workspaces; stay sacred in empty ones.
                 if(this.windowingManager.isMaximizedOrFullscreen(window)) {
                     const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
                     
@@ -492,7 +551,7 @@ export const WindowHandler = GObject.registerClass({
                         const openedMaximized = WindowState.get(window, 'openedMaximized');
                         
                         if (openedMaximized) {
-                            Logger.log('[MOSAIC WM] Opened maximized with tiled window - auto-tiling');
+                            Logger.log('[MOSAIC WM] Opened sacred (Max/Full) with tiled window - auto-tiling');
                             
                             const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
                             const tiledWindows = workspaceWindows.filter(w => {
@@ -502,20 +561,28 @@ export const WindowHandler = GObject.registerClass({
                             });
                             
                             if (tiledWindows.length > 0) {
-                                window.unmaximize(Meta.MaximizeFlags.BOTH);
+                                if (window.is_fullscreen()) {
+                                    window.unmake_fullscreen();
+                                } else {
+                                    window.unmaximize(Meta.MaximizeFlags.BOTH);
+                                }
                                 WindowState.remove(window, 'openedMaximized');
                             } else {
-                                Logger.log('[MOSAIC WM] Opened maximized without tiled window - moving to new workspace');
+                                Logger.log('[MOSAIC WM] Opened sacred without tiled window - moving to new workspace');
+                                // Save origin for restoration later
+                                WindowState.set(window, 'sacredOriginWorkspace', workspace.index());
                                 this.windowingManager.moveOversizedWindow(window);
                                 WindowState.remove(window, 'openedMaximized');
                             }
                         } else {
-                            Logger.log('[MOSAIC WM] User maximized window - moving to new workspace');
+                            Logger.log('[MOSAIC WM] User sacred window - moving to new workspace');
+                            // Save origin for restoration later
+                            WindowState.set(window, 'sacredOriginWorkspace', workspace.index());
                             this.windowingManager.moveOversizedWindow(window);
                         }
                         return GLib.SOURCE_REMOVE;
                     } else {
-                        Logger.log('[MOSAIC WM] Maximized window in empty workspace - keeping here');
+                        Logger.log('[MOSAIC WM] Sacred window in empty workspace - keeping here');
                         this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
                         return GLib.SOURCE_REMOVE;
                     }
@@ -895,6 +962,9 @@ export const WindowHandler = GObject.registerClass({
                     }
                     Logger.log('[MOSAIC WM] _windowRemoved: Workspace truly empty, navigating away');
                     this._ext.windowingManager.renavigate(WORKSPACE, WORKSPACE.active, this._ext._lastVisitedWorkspace, MONITOR);
+                    
+                    // Cleanup flag (if any)
+                    WindowState.remove(window, 'isRestoringSacred');
                 }
             }
             
@@ -1038,8 +1108,7 @@ export const WindowHandler = GObject.registerClass({
                     }
                     
                     if (hasEdgeTiles) {
-                        Logger.log('[MOSAIC WM] DnD arrival: Edge tiling detected - moving to new workspace');
-                        Logger.log('[TRACE] OVERFLOW from: DnD Smart Resize failed (Edge Tiling)');
+                        Logger.log('[MOSAIC WM] DnD arrival: Edge tiling detected - moving to new workspace (TRACE: OVERFLOW)');
                         WindowState.set(window, 'overflowMoveTimestamp', Date.now());
                         this.windowingManager.moveOversizedWindow(window);
                     } else {
