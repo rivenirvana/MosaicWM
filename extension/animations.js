@@ -171,7 +171,8 @@ export const AnimationsManager = GObject.registerClass({
                 duration: duration,
                 mode: animationMode,
                 onComplete: () => {
-                    windowActor.set_translation(0, 0, 0);
+                    if (windowActor && !windowActor.is_destroyed())
+                        windowActor.set_translation(0, 0, 0);
                     this._animatingWindows.delete(window);
                     this._checkAllAnimationsComplete();
                     if (onComplete) onComplete();
@@ -190,9 +191,12 @@ export const AnimationsManager = GObject.registerClass({
             if (this._animatingWindows.has(window)) {
                 this._animatingWindows.delete(window);
                 this._checkAllAnimationsComplete();
-                try {
-                    windowActor.set_translation(0, 0, 0);
-                } catch (e) {
+                if (windowActor && !windowActor.is_destroyed()) {
+                    try {
+                        windowActor.set_translation(0, 0, 0);
+                    } catch (e) {
+                        Logger.log(`Safety timeout set_translation failed: ${e.message}`);
+                    }
                 }
             }
             return GLib.SOURCE_REMOVE;
@@ -205,7 +209,8 @@ export const AnimationsManager = GObject.registerClass({
             mode: animationMode,
             onComplete: () => {
                 GLib.source_remove(safetyTimeout);
-                windowActor.set_translation(0, 0, 0);
+                if (windowActor && !windowActor.is_destroyed())
+                    windowActor.set_translation(0, 0, 0);
                 this._animatingWindows.delete(window);
                 this._checkAllAnimationsComplete();
                 if (onComplete) onComplete();

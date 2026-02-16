@@ -412,6 +412,11 @@ export const WindowingManager = GObject.registerClass({
     // Navigates to an appropriate workspace when current becomes empty.
     // Priority: last visited workspace, unless it's the final (always-empty) workspace
     renavigate(workspace, condition, lastVisitedIndex = null, monitorIndex = -1) {
+        if (!condition) {
+            Logger.log('renavigate: Skipping - workspace is not active');
+            return;
+        }
+
         const workspaceManager = global.workspace_manager;
         const nWorkspaces = workspaceManager.get_n_workspaces();
         const currentIndex = workspace.index();

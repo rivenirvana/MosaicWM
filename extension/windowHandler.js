@@ -102,7 +102,7 @@ export const WindowHandler = GObject.registerClass({
         // Confirmation of smart resize completion + minimum size learning
         ids.push(window.connect('size-changed', (win) => {
             ComputedLayouts.delete(win);
-            if (WindowState.get(win, 'isSmartResizing')) {
+            if (WindowState.get(win, 'isSmartResizing') || WindowState.get(win, 'isReverseSmartResizing')) {
                 // Compare target vs actual frame
                 const target = WindowState.get(win, 'targetSmartResizeSize');
                 if (target) {
@@ -704,6 +704,9 @@ export const WindowHandler = GObject.registerClass({
             return;
         }
 
+        // Abort any ongoing smart resize immediately to prevent 'zombie' logic
+        this._ext.tilingManager.abortActiveSmartResize();
+
         // Mark windows created during overview to skip slide-in animation
         if (Main.overview.visible) {
             WindowState.set(window, 'createdDuringOverview', true);
@@ -938,6 +941,9 @@ export const WindowHandler = GObject.registerClass({
             return;
         }
 
+        // Abort any ongoing smart resize immediately to prevent 'zombie' logic
+        this._ext.tilingManager.abortActiveSmartResize();
+
         WindowState.set(window, 'previousWorkspace', workspace.index());
         WindowState.set(window, 'removedTimestamp', Date.now());
 
@@ -973,20 +979,15 @@ export const WindowHandler = GObject.registerClass({
 
             Logger.log(`_windowRemoved: ${remainingWindows.length} remaining windows, freed ${freedWidth}x${freedHeight}, wasOverflowMove=${wasMovedByOverflow}`);
 
-            // FASE 5: Cleanup Smart Resize flags
-            Logger.log(`[SMART RESIZE] Cleaning up smart resize flags for remaining windows`);
+            // FASE 5: Cleanup transient Smart Resize flags
+            Logger.log(`[SMART RESIZE] Cleaning up transient flags for remaining windows`);
             for (const w of remainingWindows) {
-                const id = w.get_id();
-                const wasSmartResized = WindowState.get(w, 'smartResizing');
-                const hitMinimum = WindowState.get(w, 'hitMinimumSize');
-                const isConstrained = WindowState.get(w, 'isConstrainedByMosaic');
-
-                // We no longer clear flags here blindly.
-                // tryRestoreWindowSizes() will clear 'isConstrainedByMosaic' and 'targetSmartResizeSize'
-                // ONLY for windows that are actually restored to their preferred size.
-                WindowState.set(w, 'smartResizing', false);
+                // Ensure all windows are released from smart-resize state before we try to restore them
+                WindowState.set(w, 'isSmartResizing', false);
                 WindowState.set(w, 'hitMinimumSize', false);
-                WindowState.set(w, 'learnedMinSize', null);
+                // Do NOT clear preferredSize or isConstrainedByMosaic here! 
+                // preferredSize is needed for tryRestoreWindowSizes.
+                // isConstrainedByMosaic will be handled by tryRestoreWindowSizes itself.
             }
 
             // Try to restore window sizes with freed space (Reverse Smart Resize)
@@ -997,6 +998,10 @@ export const WindowHandler = GObject.registerClass({
                 if (restored) {
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RESIZE_SETTLE_DELAY_MS, () => {
                         Logger.log('Retiling after restore delay');
+                        // Ensure flags are cleared after settlement
+                        for (const w of remainingWindows) {
+                             WindowState.remove(w, 'isReverseSmartResizing');
+                        }
                         this._ext.tilingManager.tileWorkspaceWindows(WORKSPACE, null, MONITOR, true);
                         return GLib.SOURCE_REMOVE;
                     });

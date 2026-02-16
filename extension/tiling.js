@@ -13,7 +13,6 @@ import * as WindowState from './windowState.js';
 
 export const ComputedLayouts = new WeakMap();
 
-
 class SmartResizeIterator {
     constructor(windows, newWindow, workArea, tilingManager) {
         // Filter to only resizable windows - non-resizable windows can't be shrunk
@@ -33,9 +32,17 @@ class SmartResizeIterator {
             Logger.log(`[SMART RESIZE] No resizable windows found - cannot shrink anything`);
         }
         
-        // Use only resizable windows for the resize process
+        // Use resizable windows for the resize loop
         this.windows = this.resizableWindows;
+        
+        // Include newWindow in ALL simulations, even if it's not resizable
         this.newWindow = newWindow;
+        this.allWindows = [...this.resizableWindows, ...this.nonResizableWindows];
+        // Ensure newWindow is in allWindows if not already there (e.g. if it's non-resizable)
+        if (!this.allWindows.some(w => w.get_id() === newWindow.get_id())) {
+            this.allWindows.push(newWindow);
+        }
+
         this.workArea = workArea;
         this.tilingManager = tilingManager;
         this.iteration = 0;
@@ -48,27 +55,26 @@ class SmartResizeIterator {
         const MINIMUM_TOLERANCE = 10; // Allow small margin for borders/decoration
         
         for (const window of this.windows) {
-            const currentRect = window.get_frame_rect();
-            const currentSize = { w: currentRect.width, h: currentRect.height };
+            const currentSize = this._getEffectiveSize(window);
             const learnedMin = WindowState.get(window, 'learnedMinSize');
             const hitMinimumBefore = WindowState.get(window, 'hitMinimumSize');
             
             // Check 1: If window has a learned minimum and current size matches it, mark as at minimum
-            if (learnedMin && currentSize.w === learnedMin.w && currentSize.h === learnedMin.h) {
+            if (learnedMin && currentSize.width === learnedMin.width && currentSize.height === learnedMin.height) {
                 this.windowsAtMinimum.add(window.get_id());
-                Logger.log(`[SMART RESIZE] Window ${window.get_id()} already at learned minimum (${learnedMin.w}x${learnedMin.h})`);
+                Logger.log(`[SMART RESIZE] Window ${window.get_id()} already at learned minimum (${learnedMin.width}x${learnedMin.height})`);
             }
             // Check 2: If window already hit minimum in a previous smart resize, don't resize it again
             // (even if current size is larger due to layout changes)
             else if (hitMinimumBefore && learnedMin) {
                 this.windowsAtMinimum.add(window.get_id());
-                Logger.log(`[SMART RESIZE] Window ${window.get_id()} previously hit minimum at ${learnedMin.w}x${learnedMin.h}, not resizing again (current: ${currentSize.w}x${currentSize.h})`);
+                Logger.log(`[SMART RESIZE] Window ${window.get_id()} previously hit minimum at ${learnedMin.width}x${learnedMin.height}, not resizing again (current: ${currentSize.width}x${currentSize.height})`);
             }
             // Check 3: If window is already at/near absolute minimum size, mark as at minimum (avoids wasted iteration)
             // Include MINIMUM_TOLERANCE for window decorations/borders
-            else if (currentSize.w <= minWidth + MINIMUM_TOLERANCE && currentSize.h <= minHeight + MINIMUM_TOLERANCE) {
+            else if (currentSize.width <= minWidth + MINIMUM_TOLERANCE && currentSize.height <= minHeight + MINIMUM_TOLERANCE) {
                 this.windowsAtMinimum.add(window.get_id());
-                Logger.log(`[SMART RESIZE] Window ${window.get_id()} already near/at absolute minimum (${currentSize.w}x${currentSize.h} ~<= ${minWidth}x${minHeight})`);
+                Logger.log(`[SMART RESIZE] Window ${window.get_id()} already near/at absolute minimum (${currentSize.width}x${currentSize.height} ~<= ${minWidth}x${minHeight})`);
             }
         }
         this.originalSizes = new Map();      // {windowId -> {w, h}} before smart resize
@@ -82,10 +88,72 @@ class SmartResizeIterator {
         
         const actuallyResizable = this.resizableWindows.length - this.windowsAtMinimum.size;
         Logger.log(`[SMART RESIZE] SmartResizeIterator created for ${this.resizableWindows.length} resizable windows (${this.nonResizableWindows.length} non-resizable, ${this.windowsAtMinimum.size} already at minimum) - ${actuallyResizable} available for resize`);
+        
+        this._aborted = false;
     }
 
+    // Get the effective size of a window, handling 0x0 corners cases for new windows
+    _getEffectiveSize(window) {
+        const frame = window.get_frame_rect();
+        if (frame.width > 0 && frame.height > 0) {
+            return { width: frame.width, height: frame.height };
+        }
+        
+        // Fallback for new windows or hidden windows
+        const preferred = WindowState.get(window, 'preferredSize') || WindowState.get(window, 'openingSize');
+        if (preferred) {
+            return { width: preferred.width, height: preferred.height };
+        }
+        
+        // Final fallback (should rarely happen for managed windows)
+        return { width: constants.SMART_RESIZE_MIN_WINDOW_WIDTH || 250, 
+                 height: constants.SMART_RESIZE_MIN_WINDOW_HEIGHT || 250 };
+    }
+
+    // Immediate cancellation of the iterator
+    abort() {
+        if (this._aborted) return;
+        this._aborted = true;
+        Logger.log(`[SMART RESIZE] Iterator aborted - cancelling all operations`);
+    }
+
+    // Check if all tracked windows are still valid actors on their workspace
+    _validateWindows() {
+        if (this._aborted) return false;
+
+        for (const window of this.allWindows) {
+            // Check if window is destroyed or moved to another workspace/monitor unexpectedly
+            const actor = window.get_compositor_private();
+            if (!window || !actor || actor.is_destroyed()) {
+                Logger.log(`[SMART RESIZE] Validation FAILED: Window ${window ? window.get_id() : 'unknown'} is gone`);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Calculate current simulated layout based on currentSizes
+    calculateLayout() {
+        const simulatedWindows = this.allWindows.map(w => {
+            const id = w.get_id();
+            const current = this.currentSizes.get(id);
+            if (current) {
+                return { id, width: current.width, height: current.height };
+            }
+            
+            // Use effective size for windows not yet in currentSizes
+            const size = this._getEffectiveSize(w);
+            return { id, width: size.width, height: size.height };
+        });
+
+        return this.tilingManager._tile(simulatedWindows, this.workArea, true);
+    }
 
     async executeIteration() {
+        if (!this._validateWindows()) {
+            return { success: false, allAtMinimum: false, shouldRetry: false, aborted: true };
+        }
+
         this.iteration++;
         Logger.log(`[SMART RESIZE] ===== Iteration ${this.iteration} start =====`);
         Logger.log(`[SMART RESIZE] Windows: ${this.windows.length} candidates, ${this.windowsAtMinimum.size} at minimum`);
@@ -116,12 +184,12 @@ class SmartResizeIterator {
             // This prevents onSizeChanged from interfering with the resizing
             WindowState.set(window, 'isSmartResizing', true);
             
-            // Salvar tamanho ORIGINAL se primeira vez
+            // Save ORIGINAL size if first time
             if (!this.originalSizes.has(id)) {
-                const frame = window.get_frame_rect();
-                this.originalSizes.set(id, { width: frame.width, height: frame.height });
-                this.currentSizes.set(id, { width: frame.width, height: frame.height });
-                Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Learning original size for ${id}: ${frame.width}x${frame.height}`);
+                const size = this._getEffectiveSize(window);
+                this.originalSizes.set(id, { width: size.width, height: size.height });
+                this.currentSizes.set(id, { width: size.width, height: size.height });
+                Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Learning original size for ${id}: ${size.width}x${size.height}`);
             }
             
             // Apply proportional reduction to CURRENT size
@@ -147,6 +215,9 @@ class SmartResizeIterator {
             window.move_resize_frame(false, frame.x, frame.y, newWidth, newHeight);
         }
 
+        // Check if anything changed while we were triggering resizes
+        if (!this._validateWindows()) return { success: false, allAtMinimum: false, shouldRetry: false, aborted: true };
+
         // EVENT-DRIVEN - Wait for resizes to be applied by Mutter
         Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Waiting for size-changed signals...`);
         const hadTimeout = await this._waitForSizeChanges(toShrink, 500);
@@ -166,6 +237,13 @@ class SmartResizeIterator {
             WindowState.set(window, 'isSmartResizing', true);
             const id = window.get_id();
             const frame = window.get_frame_rect();
+            
+            // CRITICAL: If Mutter returns 0x0 (common for brand new windows), do NOT trust it as a resize result
+            if (frame.width === 0 || frame.height === 0) {
+                Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Window ${id} is 0x0 - skipping detection (will retry)`);
+                continue;
+            }
+
             const current = this.currentSizes.get(id);
             
             // Consider BOTH width and height for detection
@@ -194,7 +272,7 @@ class SmartResizeIterator {
                     Logger.log(`[SMART RESIZE] Iter ${this.iteration}: ${id} no movement detected (${noMovCount}/${this.MIN_MOVEMENT_ITERATIONS}), will retry next iteration`);
                 }
                 
-                // Atualizar currentSizes com o tamanho REAL
+                // Update currentSizes with the REAL size
                 this.currentSizes.set(id, { width: frame.width, height: frame.height });
             }
             // Detect REAL minimum - both dimensions must be stuck
@@ -228,33 +306,7 @@ class SmartResizeIterator {
         }
 
         // Phase 6: Simulate layout with CURRENT sizes (after this.iteration)
-        // Build simulation with ALL windows - newWindow may or may not be in this.windows
-        const simulatedWindows = this.windows.map(w => {
-            const isNewWindow = w.get_id() === this.newWindow.get_id();
-            const current = this.currentSizes.get(w.get_id());
-            
-            // For windows in currentSizes (already resized), use tracked size
-            // For newWindow if not in currentSizes, use current frame
-            const size = current || (isNewWindow ? this.newWindow.get_frame_rect() : null);
-            
-            if (!size) {
-                Logger.log(`[SMART RESIZE] WARNING: No size found for window ${w.get_id()}`);
-                return { id: w.get_id(), width: 250, height: 250 };
-            }
-            
-            return { id: w.get_id(), width: size.width, height: size.height };
-        });
-        
-        // If newWindow is not resizable, add it separately to the simulation
-        if (!this.windows.some(w => w.get_id() === this.newWindow.get_id())) {
-            simulatedWindows.push({
-                id: this.newWindow.get_id(),
-                width: this.newWindow.get_frame_rect().width,
-                height: this.newWindow.get_frame_rect().height
-            });
-        }
-
-        const layoutResult = this.tilingManager._tile(simulatedWindows, this.workArea, true);
+        const layoutResult = this.calculateLayout();
         
         Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Layout simulation: overflow=${layoutResult.overflow}`);
         
@@ -319,7 +371,6 @@ class SmartResizeIterator {
         Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Will continue on next iteration (${stillResizableCandidates} can still shrink)`);
         return { success: false, allAtMinimum: false, shouldRetry: true };
     }
-
 
     _calculateFreeSpacePercent(layoutResult) {
         if (!layoutResult || !layoutResult.levels || layoutResult.levels.length === 0) {
@@ -428,7 +479,12 @@ class SmartResizeIterator {
 
     // Apply final reduced sizes and mark appropriate flags
     commitResizes() {
-        Logger.log(`[SMART RESIZE] Committing ${this.originalSizes.size} resized windows`);
+        if (!this._validateWindows()) {
+            Logger.log(`[SMART RESIZE] Aborting commit - environment changed`);
+            return;
+        }
+
+        Logger.log(`[SMART RESIZE] Committing ${this.windows.length} resized windows`);
         
         for (const [id, size] of this.originalSizes) {
             const window = this.windows.find(w => w.get_id() === id);
@@ -483,15 +539,14 @@ class SmartResizeIterator {
             const frame = window.get_frame_rect();
             window.move_resize_frame(false, frame.x, frame.y, originalSize.width, originalSize.height);
             
-            WindowState.set(window, 'targetSmartResizeSize', originalSize);
+            WindowState.remove(window, 'targetSmartResizeSize');
             WindowState.set(window, 'isConstrainedByMosaic', false);
             WindowState.set(window, 'hitMinimumSize', false);
-            WindowState.set(window, 'smartResizing', false);
-            // Limpar preferredSize quando revert - janela volta ao tamanho original
-            WindowState.remove(window, 'preferredSize');
+            WindowState.set(window, 'isSmartResizing', false);
+            // CRITICAL: NEVER remove preferredSize here. It is needed for Reverse Smart Resize!
         }
         
-        // Aguardar Mutter aplicar os reverts
+        // Wait for Mutter to apply reverts
         await this._waitMs(constants.SMART_RESIZE_ITERATION_DEBOUNCE_MS);
     }
 }
@@ -524,6 +579,8 @@ export const TilingManager = GObject.registerClass({
         this._smartResizeQueue = Promise.resolve();
         // Flag to block overflow decisions during smart resize
         this._isSmartResizingBlocked = false;
+        // Reference to the currently active SmartResizeIterator
+        this._activeSmartResize = null;
         
         // Layout cache to avoid redundant O(n!) permutation calculations
         this._lastLayoutHash = null;
@@ -2221,90 +2278,75 @@ export const TilingManager = GObject.registerClass({
     }
 
      // Try to fit a new window by democratically resizing ALL resizable windows
-     
-    async tryFitWithResize(newWindow, existingWindows, workArea, overrideSize = null) {
-        const newFrame = overrideSize || newWindow.get_frame_rect();
-        const allWindows = [...existingWindows, newWindow];
+    async tryFitWithResize(newWindow, windows, workArea) {
+        if (this._isSmartResizingBlocked) return false;
         
         // Serialize smart resize operations via Promise queue
         return this._smartResizeQueue = this._smartResizeQueue.then(async () => {
             // Block overflow decisions while smart resize runs
             this._isSmartResizingBlocked = true;
             
+            const iterator = new SmartResizeIterator(windows, newWindow, workArea, this);
+            this._activeSmartResize = iterator;
+            
             try {
-                Logger.log(`[SMART RESIZE] tryFitWithResize START: ${allWindows.length} total windows (${existingWindows.length} existing + 1 new)`);
-            
-            // 0. Quick check: does it fit naturally?
-            const naturalSims = allWindows.map(w => {
-                const isNew = w.get_id() === newWindow.get_id();
-                const frame = isNew ? newFrame : w.get_frame_rect();
-                return { id: w.get_id(), width: frame.width, height: frame.height };
-            });
-            
-            const naturalResult = this._tile(naturalSims, workArea, true);
-            if (!naturalResult.overflow) {
-                Logger.log(`[SMART RESIZE] Natural fit without resize - success`);
-                return true;
-            }
-            
-            Logger.log(`[SMART RESIZE] Natural fit failed - starting iterative smart resize`);
-            
-            // 1. Criar iterator
-            const iterator = new SmartResizeIterator(existingWindows, newWindow, workArea, this);
-            
-            // 2. Early exit: if there are no resizable windows, no point trying
-            if (iterator.resizableWindows.length === 0) {
-                Logger.log(`[SMART RESIZE] No resizable windows - smart resize not possible`);
-                return false;
-            }
-            
-            // 3. Iterative loop until convergence
-            while (true) {
-                const result = await iterator.executeIteration();
+                Logger.log(`[SMART RESIZE] tryFitWithResize START: ${windows.length + 1} total windows (${windows.length} existing + 1 new)`);
                 
-                if (result.success) {
-                    // ✅ SUCCESS: Todas as janelas couberam!
-                    Logger.log(`[SMART RESIZE] SUCCESS at iteration ${iterator.iteration}`);
-                    iterator.commitResizes();
-                    
-                    // Limpar flag de smart resizing ANTES de retornar
-                    for (const window of existingWindows) {
-                        WindowState.set(window, 'smartResizing', false);
-                    }
+                // First check if it fits WITHOUT any resize (natural fit)
+                const naturalLayout = iterator.calculateLayout();
+                if (!naturalLayout.overflow) {
+                    Logger.log(`[SMART RESIZE] Natural fit confirmed - no resize needed`);
                     return true;
                 }
+
+                Logger.log(`[SMART RESIZE] Natural fit failed - starting iterative smart resize`);
                 
-                if (!result.shouldRetry) {
-                    // ❌ OVERFLOW final: Cannot fit even with all windows at minimum
-                    Logger.log(`[SMART RESIZE] OVERFLOW: Cannot fit even at minimum - applying reverse resize`);
-                    await iterator.revertAll();
+                while (iterator.iteration < iterator.maxIterations) {
+                    const result = await iterator.executeIteration();
                     
-                    // Wait for Mutter to apply reverts (event-driven with timeout)
-                    // Skip wait on early escape (window manager is slow anyway)
-                    if (!result.earlyEscape) {
-                        Logger.log(`[SMART RESIZE] Waiting for revert to apply...`);
-                        await iterator._waitForSizeChanges(existingWindows, 500);
-                    } else {
-                        Logger.log(`[SMART RESIZE] Early escape: skipping revert wait, proceeding with overflow`);
+                    if (result.aborted) {
+                        Logger.log(`[SMART RESIZE] tryFitWithResize ABORTED`);
+                        return false;
+                    }
+
+                    if (result.success) {
+                        Logger.log(`[SMART RESIZE] SUCCESS at iteration ${iterator.iteration}`);
+                        iterator.commitResizes();
+                        return true;
                     }
                     
-                    return false;
-                }
-                
-                // Continue to next iteration (fast fixed wait - not event-driven)
-                // Skip debounce on early escape to speed up overflow transition
-                if (result.earlyEscape) {
-                    Logger.log(`[SMART RESIZE] Early escape: skipping debounce, proceeding immediately to overflow`);
-                } else {
-                    Logger.log(`[SMART RESIZE] Waiting ${constants.SMART_RESIZE_ITERATION_DEBOUNCE_MS}ms before next iteration`);
+                    if (!result.shouldRetry) {
+                        // Overflow final: apply reverse resize
+                        Logger.log(`[SMART RESIZE] OVERFLOW: Cannot fit even at minimum - applying reverse resize`);
+                        await iterator.revertAll();
+                        return false;
+                    }
+                    
+                    // Delay between cycles (let Mutter apply resize)
                     await iterator._waitMs(constants.SMART_RESIZE_ITERATION_DEBOUNCE_MS);
                 }
-            }
+                
+                return false;
+            } catch (e) {
+                Logger.error(`[SMART RESIZE] Critical error in iterator: ${e.message}`);
+                return false;
             } finally {
                 this._isSmartResizingBlocked = false;
+                this._activeSmartResize = null;
                 Logger.log(`[SMART RESIZE] tryFitWithResize finished - unblocked overflow`);
             }
         });
+    }
+
+    /**
+     * Aborts any ongoing smart resize iteration.
+     * Called when windows are added or removed externally to prevent state corruption.
+     */
+    abortActiveSmartResize() {
+        if (this._activeSmartResize) {
+            this._activeSmartResize.abort();
+            this._activeSmartResize = null;
+        }
     }
 
     destroy() {
