@@ -19,7 +19,7 @@ function getAnimationsEnabled() {
             const settings = new Gio.Settings({ schema: 'org.gnome.desktop.interface' });
             _animationsEnabled = settings.get_boolean('enable-animations');
         } catch (e) {
-            Logger.log(`[MOSAIC WM] Failed to read animation settings: ${e.message}, defaulting to true`);
+            Logger.log(`Failed to read animation settings: ${e.message}, defaulting to true`);
             _animationsEnabled = true;
         }
     }
@@ -85,7 +85,7 @@ export class TimeoutRegistry {
             try {
                 GLib.source_remove(entry.sourceId);
             } catch (e) {
-                Logger.warn(`[MOSAIC WM] Failed to remove timeout: ${e.message}`);
+                Logger.warn(`Failed to remove timeout: ${e.message}`);
             }
         }
         this._timeouts.clear();
@@ -167,7 +167,7 @@ export function afterAnimations(animationsManager, callback, registry, maxWait =
     // 2. Safety fallback
     const adjustedMaxWait = Math.ceil(maxWait * getSlowDownFactor());
     timeoutId = registry.add(adjustedMaxWait, () => {
-        Logger.log('[MOSAIC WM] afterAnimations: Safety timeout triggered');
+        Logger.log('afterAnimations: Safety timeout triggered');
         trigger();
         return GLib.SOURCE_REMOVE;
     });
@@ -206,7 +206,7 @@ export function waitForGeometry(window, callback, registry, maxAttempts = consta
 
     // Safety timeout
     timeoutId = registry.add(1000, () => {
-        Logger.log('[MOSAIC WM] waitForGeometry: Safety timeout triggered');
+        Logger.log('waitForGeometry: Safety timeout triggered');
         trigger();
         return GLib.SOURCE_REMOVE;
     });
@@ -247,18 +247,18 @@ export function afterOverviewHidden(callback, registry) {
         return;
     }
     
-    Logger.log('[MOSAIC WM] Waiting for overview to hide...');
+    Logger.log('Waiting for overview to hide...');
     
     const hiddenId = Main.overview.connect('hidden', () => {
         Main.overview.disconnect(hiddenId);
-        Logger.log('[MOSAIC WM] Overview hidden - executing callback');
+        Logger.log('Overview hidden - executing callback');
         callback();
     });
     
     // Failsafe: if overview doesn't hide within 1s, execute anyway
     registry.add(1000, () => {
         if (Main.overview.visible) {
-            Logger.log('[MOSAIC WM] Overview hide timeout - forcing callback');
+            Logger.log('Overview hide timeout - forcing callback');
             try { Main.overview.disconnect(hiddenId); } catch(e) {}
             callback();
         }

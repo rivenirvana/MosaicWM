@@ -7,7 +7,6 @@ import St from 'gi://St';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -64,7 +63,7 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
     _onGlobalToggle() {
         const enabled = this.checked;
         const nWorkspaces = this._workspaceManager.get_n_workspaces();
-        Logger.log(`[MOSAIC WM] Quick Settings: Global toggle ${enabled ? 'ON' : 'OFF'}`);
+        Logger.log(`Quick Settings: Global toggle ${enabled ? 'ON' : 'OFF'}`);
         
         // Update icon
         this.gicon = _getIcon(this._extension, enabled ? 'mosaic-on-symbolic' : 'mosaic-off-symbolic');
@@ -83,7 +82,7 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
             for (let i = 0; i < nWorkspaces; i++) {
                 const workspace = this._workspaceManager.get_workspace_by_index(i);
                 if (workspace) {
-                    Logger.log(`[MOSAIC WM] Quick Settings: Re-tiling workspace ${i + 1} (global toggle)`);
+                    Logger.log(`Quick Settings: Re-tiling workspace ${i + 1} (global toggle)`);
                     this._extension.tilingManager.tileWorkspaceWindows(workspace, null, null, false);
                 }
             }
@@ -161,7 +160,7 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
     }
     
     _onWorkspaceToggle(workspaceIndex, enabled) {
-        Logger.log(`[MOSAIC WM] Quick Settings: Workspace ${workspaceIndex + 1} mosaic ${enabled ? 'ON' : 'OFF'}`);
+        Logger.log(`Quick Settings: Workspace ${workspaceIndex + 1} mosaic ${enabled ? 'ON' : 'OFF'}`);
         
         const workspace = this._workspaceManager.get_workspace_by_index(workspaceIndex);
         if (workspace) {
@@ -179,7 +178,7 @@ class MosaicMenuToggle extends QuickSettings.QuickMenuToggle {
         if (enabled) {
             const workspace = this._workspaceManager.get_workspace_by_index(workspaceIndex);
             if (workspace) {
-                Logger.log(`[MOSAIC WM] Quick Settings: Re-tiling workspace ${workspaceIndex + 1}`);
+                Logger.log(`Quick Settings: Re-tiling workspace ${workspaceIndex + 1}`);
                 // Monitor detection is automatic in tileWorkspaceWindows
                 this._extension.tilingManager.tileWorkspaceWindows(workspace, null, null, false);
             }

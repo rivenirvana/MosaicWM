@@ -62,7 +62,7 @@ export const DrawingManager = GObject.registerClass({
         this.removeBoxes();
         
         if (!this._edgeTilingManager) {
-            Logger.warn('[MOSAIC WM] showTilePreview: EdgeTilingManager not set');
+            Logger.warn('showTilePreview: EdgeTilingManager not set');
             return;
         }
         

@@ -3,7 +3,7 @@
 // Core mosaic tiling algorithm and layout management
 
 import GLib from 'gi://GLib';
-import Clutter from 'gi://Clutter'; // CRITICAL: Used for Enums (AnimationMode, etc)
+import Clutter from 'gi://Clutter'; // Used for Enums (AnimationMode, etc)
 import GObject from 'gi://GObject';
 
 import * as Logger from './logger.js';
@@ -13,22 +13,14 @@ import * as WindowState from './windowState.js';
 
 export const ComputedLayouts = new WeakMap();
 
-/**
- * SmartResizeIterator - Manages democratic and iterative window resizing
- * 
- * Responsible for:
- * - Apply proportional reduction (10% per cycle) to all windows
- * - Detect when a window reaches its minimum size (no change > DELTA)
- * - Maintain state across multiple iterations
- * - Revert everything to original on overflow
- */
+
 class SmartResizeIterator {
     constructor(windows, newWindow, workArea, tilingManager) {
         // Filter to only resizable windows - non-resizable windows can't be shrunk
         const existingResizable = windows.filter(w => w.allows_resize && w.allows_resize());
         const existingNonResizable = windows.filter(w => !w.allows_resize || !w.allows_resize());
         
-        // CRITICAL: Include newWindow in resize pool if it's resizable
+        // Include newWindow in resize pool if it's resizable
         // This ensures BOTH existing and new windows are democratically resized together
         const newWindowResizable = newWindow.allows_resize && newWindow.allows_resize();
         const allResizable = newWindowResizable ? [...existingResizable, newWindow] : existingResizable;
@@ -92,10 +84,7 @@ class SmartResizeIterator {
         Logger.log(`[SMART RESIZE] SmartResizeIterator created for ${this.resizableWindows.length} resizable windows (${this.nonResizableWindows.length} non-resizable, ${this.windowsAtMinimum.size} already at minimum) - ${actuallyResizable} available for resize`);
     }
 
-    /**
-     * Executes a democratic resizing cycle
-     * @returns {Promise<Object>} {success: boolean, allAtMinimum: boolean, shouldRetry: boolean}
-     */
+
     async executeIteration() {
         this.iteration++;
         Logger.log(`[SMART RESIZE] ===== Iteration ${this.iteration} start =====`);
@@ -123,7 +112,7 @@ class SmartResizeIterator {
             const id = window.get_id();
             this.resizeAttempts.set(id, (this.resizeAttempts.get(id) || 0) + 1);
             
-            // CRITICAL: Mark window as smart resizing BEFORE calling move_resize_frame
+            // Mark window as smart resizing BEFORE calling move_resize_frame
             // This prevents onSizeChanged from interfering with the resizing
             WindowState.set(window, 'isSmartResizing', true);
             
@@ -158,10 +147,8 @@ class SmartResizeIterator {
             window.move_resize_frame(false, frame.x, frame.y, newWidth, newHeight);
         }
 
-        // Phase 4: EVENT-DRIVEN - Wait for resizes to be applied by Mutter
-        // NOTE: instead of await this._waitMs(200), we use event-driven with Promise.race
-        // This reduces typical time from 200ms to ~50-100ms (when Mutter actually responds)
-        Logger.log(`[SMART RESIZE] Iter ${this.iteration}: [EVENT-DRIVEN] Waiting for size-changed signals...`);
+        // EVENT-DRIVEN - Wait for resizes to be applied by Mutter
+        Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Waiting for size-changed signals...`);
         const hadTimeout = await this._waitForSizeChanges(toShrink, 500);
         if (hadTimeout) {
             this.consecutiveTimeouts++;
@@ -174,7 +161,7 @@ class SmartResizeIterator {
         const minHeight = constants.SMART_RESIZE_MIN_WINDOW_HEIGHT || 250;
         
         for (const window of toShrink) {
-            // CRITICAL: Keep isSmartResizing flag active during detection
+            // Keep isSmartResizing flag active during detection
             // Prevents onSizeChanged from triggering tiling during iteration
             WindowState.set(window, 'isSmartResizing', true);
             const id = window.get_id();
@@ -210,7 +197,7 @@ class SmartResizeIterator {
                 // Atualizar currentSizes com o tamanho REAL
                 this.currentSizes.set(id, { width: frame.width, height: frame.height });
             }
-            // CRITICAL: Detect REAL minimum - both dimensions must be stuck
+            // Detect REAL minimum - both dimensions must be stuck
             else if (bothDimensionsStuck) {
                 const noMovCount = (this.noMovementCount.get(id) || 0) + 1;
                 this.noMovementCount.set(id, noMovCount);
@@ -224,7 +211,7 @@ class SmartResizeIterator {
                     Logger.log(`[SMART RESIZE] Iter ${this.iteration}: ${id} both dimensions stuck (${noMovCount}/${this.MIN_MOVEMENT_ITERATIONS}), will retry next iteration`);
                 }
                 
-                // IMPORTANT: Update currentSizes with the REAL size
+                // Update currentSizes with the REAL size
                 this.currentSizes.set(id, { width: frame.width, height: frame.height });
             } else if (eitherDimensionMoving) {
                 // Excellent! At least one dimension shrank - continue trying
@@ -241,7 +228,7 @@ class SmartResizeIterator {
         }
 
         // Phase 6: Simulate layout with CURRENT sizes (after this.iteration)
-        // CRITICAL: Build simulation with ALL windows - newWindow may or may not be in this.windows
+        // Build simulation with ALL windows - newWindow may or may not be in this.windows
         const simulatedWindows = this.windows.map(w => {
             const isNewWindow = w.get_id() === this.newWindow.get_id();
             const current = this.currentSizes.get(w.get_id());
@@ -272,7 +259,7 @@ class SmartResizeIterator {
         Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Layout simulation: overflow=${layoutResult.overflow}`);
         
         if (!layoutResult.overflow) {
-            Logger.log(`[SMART RESIZE] Iteration ${this.iteration}: ✓ SUCCESS - all windows fit!`);
+            Logger.log(`[SMART RESIZE] Iteration ${this.iteration}: SUCCESS - all windows fit!`);
             return { success: true, shouldRetry: false };
         }
 
@@ -282,7 +269,7 @@ class SmartResizeIterator {
         
         Logger.log(`[SMART RESIZE] Iter ${this.iteration}: Still overflowing. Resizable remaining: ${stillResizableCandidates}`);
         
-        // CRITICAL OPTIMIZATION (Iter 1 Early Exit): If NO window made progress in this iteration
+        // OPTIMIZATION (Iter 1 Early Exit): If NO window made progress in this iteration
         // Means preferred sizes are at the app's real limit - overflow is permanent and future iterations are futile
         const anyWindowMadeProgressThisIteration = this.windows.some(w => {
             const lastShrank = this.lastIterationWindowShrank.get(w.get_id());
@@ -301,7 +288,7 @@ class SmartResizeIterator {
         
         // Only reliable condition: 100% of windows are at minimum but overflow still exists
         if (allAtMinimum) {
-            Logger.log(`[SMART RESIZE] All windows at minimum but overflow persists - ✗ CANNOT FIT (overflow inevitable)`);
+            Logger.log(`[SMART RESIZE] All windows at minimum but overflow persists - CANNOT FIT (overflow inevitable)`);
             return { success: false, allAtMinimum: true, shouldRetry: false };
         }
 
@@ -333,12 +320,7 @@ class SmartResizeIterator {
         return { success: false, allAtMinimum: false, shouldRetry: true };
     }
 
-    /**
-     * Calculate free space percentage in workspace
-     * Based on the bounding box of levels returned by layout
-     * @param {Object} layoutResult - Result of tiling simulation
-     * @returns {number} Free space percentage (0-100)
-     */
+
     _calculateFreeSpacePercent(layoutResult) {
         if (!layoutResult || !layoutResult.levels || layoutResult.levels.length === 0) {
             return 100; // If no data, assume available space
@@ -383,9 +365,6 @@ class SmartResizeIterator {
 
     // EVENT-DRIVEN: Wait for resizing via 'size-changed' signals
     // Resolves on first signal (Promise.race) instead of polling
-    // Reduces time: ~50-100ms real vs fixed 200ms
-    // @param {MetaWindow[]} windows - Windows to monitor
-    // @param {number} timeoutMs - Max time before timeout (default 1500ms)
     async _waitForSizeChanges(windows, timeoutMs = 1500) {
         if (windows.length === 0) {
             Logger.log(`[SMART RESIZE EVENT-DRIVEN] No windows to monitor, returning immediately`);
@@ -434,7 +413,7 @@ class SmartResizeIterator {
         } catch (e) {
             Logger.log(`[SMART RESIZE EVENT-DRIVEN] Promise.race error (should not happen): ${e}`);
         } finally {
-            // CRITICAL: Cleanup - disconnect all handlers
+            // Cleanup - disconnect all handlers
             for (const { window, handler } of signalHandlers) {
                 try {
                     window.disconnect(handler);
@@ -456,11 +435,14 @@ class SmartResizeIterator {
             if (!window) continue;
 
             WindowState.set(window, 'originalSize', size);
-            // CRITICAL: Save original size in preferredSize for later restoration
-            // When window closes, tryRestoreWindowSizes() will use this to expand remaining windows
-            WindowState.set(window, 'preferredSize', { width: size.width, height: size.height });
+            // Save original size in preferredSize for later restoration
+            // ONLY if not already set (preserve the VERY first original size)
+            if (!WindowState.has(window, 'preferredSize')) {
+                WindowState.set(window, 'preferredSize', { width: size.width, height: size.height });
+                Logger.log(`[SMART RESIZE] Initial preferredSize set for ${id}: ${size.width}x${size.height}`);
+            }
             WindowState.set(window, 'isConstrainedByMosaic', true);
-            // CRITICAL: Disable isSmartResizing flag AFTER successful commit
+            // Disable isSmartResizing flag AFTER successful commit
             // Releases onSizeChanged to work normally again
             WindowState.set(window, 'isSmartResizing', false);
             
@@ -469,7 +451,7 @@ class SmartResizeIterator {
             
             Logger.log(`[SMART RESIZE] Committed: ${id}, original=${size.width}x${size.height}, current=${current.width}x${current.height}`);
             
-            // IMPORTANT: Validate that the CURRENT window size matches what was applied
+            // Validate that the CURRENT window size matches what was applied
             // If there's mismatch, clear targetSmartResizeSize to avoid outdated masks
             const sizeMismatch = Math.max(
                 Math.abs(frame.width - current.width),
@@ -632,7 +614,7 @@ export const TilingManager = GObject.registerClass({
     // Queue a window opening operation to prevent race conditions
     // The callback will be called when it's this window's turn
     enqueueWindowOpen(windowId, callback) {
-        Logger.log(`[MOSAIC WM] Enqueuing window ${windowId} for opening (queue size: ${this._openingQueue.length})`);
+        Logger.log(`Enqueuing window ${windowId} for opening (queue size: ${this._openingQueue.length})`);
         this._openingQueue.push({ windowId, callback });
         this._processOpeningQueue();
     }
@@ -646,11 +628,11 @@ export const TilingManager = GObject.registerClass({
         this._processingQueue = true;
         const { windowId, callback } = this._openingQueue.shift();
         
-        Logger.log(`[MOSAIC WM] Processing queue: window ${windowId} (remaining: ${this._openingQueue.length})`);
+        Logger.log(`Processing queue: window ${windowId} (remaining: ${this._openingQueue.length})`);
         
         // Monitor this processing step
         const watchdogId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-             Logger.log(`[MOSAIC WM] Queue watchdog: Window ${windowId} callback took too long or stalled - forcing next`);
+             Logger.log(`Queue watchdog: Window ${windowId} callback took too long or stalled - forcing next`);
              this._processingQueue = false;
              this._processOpeningQueue();
              return GLib.SOURCE_REMOVE;
@@ -660,7 +642,7 @@ export const TilingManager = GObject.registerClass({
         try {
             callback();
         } catch (e) {
-            Logger.log(`[MOSAIC WM] Error processing window ${windowId}: ${e}`);
+            Logger.log(`Error processing window ${windowId}: ${e}`);
         } finally {
             if (watchdogId) GLib.source_remove(watchdogId);
         }
@@ -864,7 +846,7 @@ export const TilingManager = GObject.registerClass({
         }
         
         const elapsed = Date.now() - startTime;
-        Logger.log(`[MOSAIC WM] _findOptimalOrder: ${windows.length} windows, ${permutations.length} permutations, ${elapsed}ms`);
+        Logger.log(`_findOptimalOrder: ${windows.length} windows, ${permutations.length} permutations, ${elapsed}ms`);
         
         return bestOrder;
     }
@@ -885,7 +867,7 @@ export const TilingManager = GObject.registerClass({
 
         const hash = this._getLayoutHash(windows, work_area);
         if (this._cachedTileResult && this._lastLayoutHash === hash && !isSimulation) {
-            Logger.log('[MOSAIC WM] _tile: Cache hit, reusing layout');
+            Logger.log('_tile: Cache hit, reusing layout');
             return this._cachedTileResult;
         }
         
@@ -910,7 +892,7 @@ export const TilingManager = GObject.registerClass({
         // Find optimal window ordering (tries permutations, scores each layout)
         const optimalWindows = this._findOptimalOrder(windows, work_area, tilingFn);
         
-        Logger.log(`[MOSAIC WM] _tile: ${windows.length} windows, vertical=${useVerticalShelves}, optimized order`);
+        Logger.log(`_tile: ${windows.length} windows, vertical=${useVerticalShelves}, optimized order`);
         
         // Execute with optimal order and cache result (unless simulation)
         const result = tilingFn.call(this, optimalWindows, work_area, spacing);
@@ -1446,7 +1428,7 @@ export const TilingManager = GObject.registerClass({
         if(!tile_info.vertical) {
             let y = _y;
             for(let level of levels) {
-                Logger.log(`[MOSAIC WM] Drawing horizontal level at y=${y}, width=${level.width}, height=${level.height}`);
+                Logger.log(`Drawing horizontal level at y=${y}, width=${level.width}, height=${level.height}`);
                 // Pass masks, isDragging AND drawingManager AND dryRun
                 level.draw_horizontal(meta_windows, work_area, y, this.masks, this.isDragging, this._drawingManager, dryRun);
                 y += level.height + constants.WINDOW_SPACING;
@@ -1454,7 +1436,7 @@ export const TilingManager = GObject.registerClass({
         } else {
             let x = _x;
             for(let level of levels) {
-                Logger.log(`[MOSAIC WM] Drawing vertical level at x=${x}, width=${level.width}, height=${level.height}`);
+                Logger.log(`Drawing vertical level at x=${x}, width=${level.width}, height=${level.height}`);
                 level.draw_vertical(meta_windows, x, this.masks, this.isDragging, this._drawingManager, dryRun);
                 x += level.width + constants.WINDOW_SPACING;
             }
@@ -1535,7 +1517,7 @@ export const TilingManager = GObject.registerClass({
             this._animationsManager.animateReTiling(windowLayouts, draggedWindow);
         }
 
-        // UNLOCK: Release workspace lock after signals from move_resize have likely fired.
+        // Release workspace lock after signals from move_resize have likely fired.
         // We use a safe delay matching the animation duration.
         if (this._extension && this._extension.windowHandler) {
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.ANIMATION_DURATION_MS + 100, () => {
@@ -1549,11 +1531,11 @@ export const TilingManager = GObject.registerClass({
 
     tileWorkspaceWindows(workspace, reference_meta_window, _monitor, keep_oversized_windows, excludeFromTiling = false, dryRun = false, isRecursive = false) {
         if (this._extension && !this._extension.isMosaicEnabledForWorkspace(workspace)) {
-            Logger.log(`[MOSAIC WM] Mosaic disabled for workspace ${workspace.index()} - skipping tiling`);
+            Logger.log(`Mosaic disabled for workspace ${workspace.index()} - skipping tiling`);
             return { overflow: false, layout: null };
         }
 
-        Logger.log(`[MOSAIC WM] tileWorkspaceWindows: Starting for workspace ${workspace.index()} (isRecursive=${isRecursive})`);
+        Logger.log(`tileWorkspaceWindows: Starting for workspace ${workspace.index()} (isRecursive=${isRecursive})`);
 
         // Clear previous masks before drawing; recycle boxes if dragging.
         if (!isRecursive && !dryRun) {
@@ -1571,7 +1553,7 @@ export const TilingManager = GObject.registerClass({
             if (!reference_meta_window) {
                 const nMonitors = global.display.get_n_monitors();
                 if (nMonitors > 1) {
-                    Logger.log(`[MOSAIC WM] Auto-tiling workspace ${workspace.index()} across ${nMonitors} monitors`);
+                    Logger.log(`Auto-tiling workspace ${workspace.index()} across ${nMonitors} monitors`);
                 }
                 for (let m = 0; m < nMonitors; m++) {
                     this.tileWorkspaceWindows(workspace, null, m, keep_oversized_windows, excludeFromTiling, dryRun, true);
@@ -1610,30 +1592,30 @@ export const TilingManager = GObject.registerClass({
         let edgeTiledWindows = [];
         if (this._edgeTilingManager) {
             edgeTiledWindows = this._edgeTilingManager.getEdgeTiledWindows(workspace, monitor);
-            Logger.log(`[MOSAIC WM] tileWorkspaceWindows: Found ${edgeTiledWindows.length} edge-tiled windows`);
+            Logger.log(`tileWorkspaceWindows: Found ${edgeTiledWindows.length} edge-tiled windows`);
         }
         
         if (edgeTiledWindows.length > 0) {
-            Logger.log(`[MOSAIC WM] Found ${edgeTiledWindows.length} edge-tiled window(s)`);
+            Logger.log(`Found ${edgeTiledWindows.length} edge-tiled window(s)`);
             
             // Check if we have 2 half-tiles (left + right = fully occupied)
             const zones = edgeTiledWindows.map(w => w.zone);
-            Logger.log(`[MOSAIC WM] Edge tile zones detected: [${zones.join(', ')}]`);
+            Logger.log(`Edge tile zones detected: [${zones.join(', ')}]`);
             const hasLeftFull = zones.includes(TileZone.LEFT_FULL);
             const hasRightFull = zones.includes(TileZone.RIGHT_FULL);
             const hasLeftQuarters = zones.some(z => z === TileZone.TOP_LEFT || z === TileZone.BOTTOM_LEFT);
             const hasRightQuarters = zones.some(z => z === TileZone.TOP_RIGHT || z === TileZone.BOTTOM_RIGHT);
             
-            Logger.log(`[MOSAIC WM] Zone check: leftFull=${hasLeftFull}, rightFull=${hasRightFull}, leftQuarters=${hasLeftQuarters}, rightQuarters=${hasRightQuarters}`);
+            Logger.log(`Zone check: leftFull=${hasLeftFull}, rightFull=${hasRightFull}, leftQuarters=${hasLeftQuarters}, rightQuarters=${hasRightQuarters}`);
             
             if ((hasLeftFull || hasLeftQuarters) && (hasRightFull || hasRightQuarters)) {
                 // Don't move windows during drag - just show preview
                 if (this.isDragging) {
-                    Logger.log('[MOSAIC WM] Both sides edge-tiled - deferring overflow until drag ends');
+                    Logger.log('Both sides edge-tiled - deferring overflow until drag ends');
                     return { overflow: false, layout: null }; // Let preview show but don't move windows
                 }
                 
-                Logger.log('[MOSAIC WM] Both sides edge-tiled - workspace fully occupied');
+                Logger.log('Both sides edge-tiled - workspace fully occupied');
                 
                 // GUARD: Only trigger mass expulsion if the change was caused by an edge-tiled window (completing the wall)
                 // If a normal window is added to a full workspace, ONLY expel that window.
@@ -1651,7 +1633,7 @@ export const TilingManager = GObject.registerClass({
                     // 2. OR the reference window IS an edge tile (meaning we just closed the wall on existing windows)
                     if (isRef || isReferenceEdgeTiled) {
                         if (!this._windowingManager.isExcluded(window) && !this._windowingManager.isMaximizedOrFullscreen(window)) {
-                            Logger.log(`[MOSAIC WM] Expelling non-edge-tiled window ${window.get_id()} (RefEdgeTiled=${isReferenceEdgeTiled}, IsRef=${isRef})`);
+                            Logger.log(`Expelling non-edge-tiled window ${window.get_id()} (RefEdgeTiled=${isReferenceEdgeTiled}, IsRef=${isRef})`);
                             this._windowingManager.moveOversizedWindow(window);
                         }
                     }
@@ -1665,22 +1647,22 @@ export const TilingManager = GObject.registerClass({
             const edgeTiledIds = edgeTiledWindows.map(s => s.window.get_id());
             const nonEdgeTiledCount = workspace_windows.filter(w => !edgeTiledIds.includes(w.get_id())).length;
             if (this.dragRemainingSpace) {
-             Logger.log(`[MOSAIC WM] Reusing drag remaining space: x=${this.dragRemainingSpace.x}, w=${this.dragRemainingSpace.width}`);
+             Logger.log(`Reusing drag remaining space: x=${this.dragRemainingSpace.x}, w=${this.dragRemainingSpace.width}`);
              // If we have a cached remaining space from drag, use it
              work_area = this.dragRemainingSpace;
             } else {
-                Logger.log(`[MOSAIC WM] Remaining space: x=${remainingSpace.x}, y=${remainingSpace.y}, w=${remainingSpace.width}, h=${remainingSpace.height}`);
-                Logger.log(`[MOSAIC WM] Total workspace windows: ${workspace_windows.length}, Non-edge-tiled: ${nonEdgeTiledCount}`);
+                Logger.log(`Remaining space: x=${remainingSpace.x}, y=${remainingSpace.y}, w=${remainingSpace.width}, h=${remainingSpace.height}`);
+                Logger.log(`Total workspace windows: ${workspace_windows.length}, Non-edge-tiled: ${nonEdgeTiledCount}`);
                 
                 // Filter out edge-tiled windows from tiling
                 meta_windows = meta_windows.filter(w => !edgeTiledIds.includes(w.get_id()));
-                Logger.log(`[MOSAIC WM] After filtering edge-tiled: ${meta_windows.length} windows to tile`);
+                Logger.log(`After filtering edge-tiled: ${meta_windows.length} windows to tile`);
                 
                 // Also filter out maximized/fullscreen windows (SACRED - never touch them)
                 const beforeMaxFilter = meta_windows.length;
                 meta_windows = meta_windows.filter(w => !this._windowingManager.isMaximizedOrFullscreen(w));
                 if (meta_windows.length < beforeMaxFilter) {
-                    Logger.log(`[MOSAIC WM] Filtered ${beforeMaxFilter - meta_windows.length} maximized/fullscreen (sacred) windows`);
+                    Logger.log(`Filtered ${beforeMaxFilter - meta_windows.length} maximized/fullscreen (sacred) windows`);
                 }
                 
                 // Set work_area to remaining space for tiling calculations
@@ -1688,7 +1670,7 @@ export const TilingManager = GObject.registerClass({
                 
                 // If no non-edge-tiled windows, nothing to tile
                 if (meta_windows.length === 0) {
-                    Logger.log('[MOSAIC WM] No non-edge-tiled windows to tile');
+                    Logger.log('No non-edge-tiled windows to tile');
                     return { overflow: false, layout: null };
                 }
             }
@@ -1702,14 +1684,14 @@ export const TilingManager = GObject.registerClass({
         
         const sacredWindows = meta_windows.filter(isSacredWindow);
         if (sacredWindows.length > 0) {
-            Logger.log(`[MOSAIC WM] Excluding ${sacredWindows.length} SACRED windows: ${sacredWindows.map(w => w.get_id()).join(', ')}`);
+            Logger.log(`Excluding ${sacredWindows.length} SACRED windows: ${sacredWindows.map(w => w.get_id()).join(', ')}`);
             meta_windows = meta_windows.filter(w => !isSacredWindow(w));
             windows = windows.filter((_, idx) => !isSacredWindow(working_info.meta_windows[idx]));
         }
         
         // If no windows left to tile, return early
         if (meta_windows.length === 0) {
-            Logger.log(`[MOSAIC WM] No windows left to tile after filtering sacred windows. Original count: ${working_info.meta_windows.length}`);
+            Logger.log(`No windows left to tile after filtering sacred windows. Original count: ${working_info.meta_windows.length}`);
             return { overflow: false, layout: null };
         }
         
@@ -1744,9 +1726,9 @@ export const TilingManager = GObject.registerClass({
             const isNewlyAdded = addedTime && (Date.now() - addedTime) < 2000;
             
             if (!isNewlyAdded && !WindowState.get(reference_meta_window, 'forceOverflow') && !WindowState.get(reference_meta_window, 'isRestoringSacred')) {
-                Logger.log(`[MOSAIC WM] Skipping overflow for ${reference_meta_window.get_id()} - not a new window`);
+                Logger.log(`Skipping overflow for ${reference_meta_window.get_id()} - not a new window`);
             } else if (WindowState.get(reference_meta_window, 'isSmartResizing') || WindowState.get(reference_meta_window, 'isRestoringSacred')) {
-                Logger.log(`[MOSAIC WM] Skipping overflow for ${reference_meta_window.get_id()} - smart resize/sacred restore in progress`);
+                Logger.log(`Skipping overflow for ${reference_meta_window.get_id()} - smart resize/sacred restore in progress`);
                 
                 // FORCE RESIZE ATTEMPT IF NEEDED
                 // If it's a sacred return, we MUST try to fit it, even if it means squishing everyone.
@@ -1760,9 +1742,9 @@ export const TilingManager = GObject.registerClass({
                                           
                      // Only try resize if we haven't already (to avoid loops)
                      if (!WindowState.get(reference_meta_window, 'isSmartResizing')) {
-                         Logger.log(`[MOSAIC WM] Triggering Smart Resize for returning sacred window`);
+                         Logger.log(`Triggering Smart Resize for returning sacred window`);
                          if (this.tryFitWithResize(reference_meta_window, realExisting, workArea)) {
-                             Logger.log(`[MOSAIC WM] Sacred window fitted with resize!`);
+                             Logger.log(`Sacred window fitted with resize!`);
                              return { overflow: false, layout: null }; // Return early to let resize happen
                          }
                      }
@@ -1781,7 +1763,7 @@ export const TilingManager = GObject.registerClass({
             }
         }
         
-        Logger.log(`[MOSAIC WM] Drawing tiles - isDragging: ${this.isDragging}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
+        Logger.log(`Drawing tiles - isDragging: ${this.isDragging}, using tileArea: x=${tileArea.x}, y=${tileArea.y}`);
         
         // ANIMATIONS
         let animationsHandledPositioning = false;
@@ -1790,7 +1772,7 @@ export const TilingManager = GObject.registerClass({
             
             // Allow animation for windows returning from excluded state
             if (reference_meta_window && WindowState.get(reference_meta_window, 'justReturnedFromExclusion')) {
-                Logger.log(`[MOSAIC WM] Allowing animation for returning excluded window ${reference_meta_window.get_id()}`);
+                Logger.log(`Allowing animation for returning excluded window ${reference_meta_window.get_id()}`);
                 WindowState.remove(reference_meta_window, 'justReturnedFromExclusion');
             }
             
@@ -1799,93 +1781,43 @@ export const TilingManager = GObject.registerClass({
         
         if (!animationsHandledPositioning) {
             // Only call drawTile if animations didn't handle positioning
-            Logger.log(`[MOSAIC WM] Animations did not handle positioning, calling drawTile`);
+            Logger.log(`Animations did not handle positioning, calling drawTile`);
             this._drawTile(tile_info, tileArea, meta_windows);
         } else {
-            Logger.log(`[MOSAIC WM] Animations handled positioning, skipping drawTile`);
+            Logger.log(`Animations handled positioning, skipping drawTile`);
         }
         
         const result = { overflow, layout: this._cachedTileResult?.windows || null };
         this.emit('mosaic-changed', workspace);
         
-        // PHASE 4: Save preferred size only after success (final-only)
-        // Apenas se NOT em overflow e tiling foi bem-sucedido
-        if (!overflow && !this.isDragging && meta_windows &&  meta_windows.length > 0) {
-            Logger.log(`[SMART RESIZE] Saving preferred size for ${meta_windows.length} windows after successful tiling`);
-            
-            // Windows that were constrained by mosaic (smart resize applied)
-            const windowsShrunk = meta_windows.filter(w => WindowState.get(w, 'isConstrainedByMosaic'));
-            
-            if (windowsShrunk.length > 0) {
-                Logger.log(`[SMART RESIZE] Found ${windowsShrunk.length} constrained windows - saving preferred size`);
-                
-                for (const window of windowsShrunk) {
-                    // CRITICAL: Do NOT override preferredSize if already set by smart resize
-                    // commitResizes() already set it with ORIGINAL size, don't override here
-                    const hasOriginalPreferred = WindowState.get(window, 'originalSize');
-                    if (hasOriginalPreferred) {
-                        Logger.log(`[SMART RESIZE] Skipping preferred size save for ${window.get_id()} - already set by smart resize`);
-                        continue;
-                    }
-                    
-                    const currentFrame = window.get_frame_rect();
-                    WindowState.set(window, 'preferredSize', { 
-                        width: currentFrame.width, 
-                        height: currentFrame.height 
-                    });
-                    Logger.log(`[SMART RESIZE] Preferred size saved: ${window.get_id()} = ${currentFrame.width}x${currentFrame.height}`);
-                }
-            }
-            
-            // Reference window (new window that was added)
-            if (reference_meta_window) {
-                const refId = reference_meta_window.get_id();
-                
-                // If smart resize was applied to it, preferred size is already at final reduced size
-                if (WindowState.get(reference_meta_window, 'isSmartResizing')) {
-                    const finalFrame = reference_meta_window.get_frame_rect();
-                    WindowState.set(reference_meta_window, 'preferredSize', { 
-                        width: finalFrame.width, 
-                        height: finalFrame.height 
-                    });
-                    Logger.log(`[SMART RESIZE] New window preferred (after smart resize): ${refId} = ${finalFrame.width}x${finalFrame.height}`);
-                } else if (!WindowState.get(reference_meta_window, 'preferredSize')) {
-                    // Smart resize was not applied - save opening size as preferred
-                    const openingSize = WindowState.get(reference_meta_window, 'openingSize') || reference_meta_window.get_frame_rect();
-                    WindowState.set(reference_meta_window, 'preferredSize', openingSize);
-                    Logger.log(`[SMART RESIZE] New window preferred (opening size): ${refId} = ${openingSize.width}x${openingSize.height}`);
-                }
-            }
-        }
-        
         return result;
     }
 
     canFitWindow(window, workspace, monitor, relaxed = false, overrideSize = null) {
-        Logger.log(`[MOSAIC WM] canFitWindow: Checking if window can fit in workspace ${workspace.index()} (relaxed=${relaxed})`);
+        Logger.log(`canFitWindow: Checking if window can fit in workspace ${workspace.index()} (relaxed=${relaxed})`);
         
         // Excluded windows (Always on Top, Sticky) always "fit" - they don't participate in tiling
         // This allows them to coexist with fullscreen/maximized windows
         if (this._windowingManager.isExcluded(window)) {
-            Logger.log('[MOSAIC WM] canFitWindow: Window is excluded - always fits (not tiled)');
+            Logger.log('canFitWindow: Window is excluded - always fits (not tiled)');
             return true;
         }
         
         if (window.is_fullscreen()) {
-            Logger.log('[MOSAIC WM] canFitWindow: Window is fullscreen - always fits (no overflow)');
+            Logger.log('canFitWindow: Window is fullscreen - always fits (no overflow)');
             return true;
         }
 
         
         const working_info = this._getWorkingInfo(workspace, window, monitor);
         if (!working_info) {
-            Logger.log('[MOSAIC WM] canFitWindow: No working info - cannot fit');
+            Logger.log('canFitWindow: No working info - cannot fit');
             return false;
         }
 
         for (const existing_window of working_info.meta_windows) {
             if(this._windowingManager.isMaximizedOrFullscreen(existing_window)) {
-                Logger.log('[MOSAIC WM] canFitWindow: Workspace has maximized window - cannot fit');
+                Logger.log('canFitWindow: Workspace has maximized window - cannot fit');
                 return false;
             }
         }
@@ -1907,12 +1839,12 @@ export const TilingManager = GObject.registerClass({
             const hasRightQuarters = zones.some(z => z === TileZone.TOP_RIGHT || z === TileZone.BOTTOM_RIGHT);
             
             if ((hasLeftFull || hasLeftQuarters) && (hasRightFull || hasRightQuarters)) {
-                Logger.log('[MOSAIC WM] canFitWindow: Workspace fully occupied by edge tiles - cannot fit');
+                Logger.log('canFitWindow: Workspace fully occupied by edge tiles - cannot fit');
                 return false;
             }
             
             availableSpace = this._edgeTilingManager.calculateRemainingSpace(workspace, monitor);
-            Logger.log(`[MOSAIC WM] canFitWindow: Using remaining space after snap: ${availableSpace.width}x${availableSpace.height}`);
+            Logger.log(`canFitWindow: Using remaining space after snap: ${availableSpace.width}x${availableSpace.height}`);
         }
 
         const edgeTiledIds = edgeTiledWindows.map(s => s.window.get_id());
@@ -1921,7 +1853,7 @@ export const TilingManager = GObject.registerClass({
             !edgeTiledIds.includes(w.id)
         );
         
-        // CRITICAL: Use same dimension priority as WindowDescriptor for consistency
+        // Use same dimension priority as WindowDescriptor for consistency
         // with tileWorkspaceWindows. Priority: targetRestoredSize → targetSmartResizeSize → frame_rect
         const workspaceWindows = workspace.list_windows();
         
@@ -1953,7 +1885,7 @@ export const TilingManager = GObject.registerClass({
             if (overrideSize) {
                 realWidth = overrideSize.width;
                 realHeight = overrideSize.height;
-                Logger.log(`[MOSAIC WM] canFitWindow: Using overrideSize ${realWidth}x${realHeight}`);
+                Logger.log(`canFitWindow: Using overrideSize ${realWidth}x${realHeight}`);
             } else {
                 const preferredSize = WindowState.get(window, 'preferredSize') || WindowState.get(window, 'openingSize');
                 const frame = window.get_frame_rect();
@@ -1963,7 +1895,7 @@ export const TilingManager = GObject.registerClass({
                 realHeight = preferredSize ? preferredSize.height : frame.height;
             }
             
-            Logger.log(`[MOSAIC WM] canFitWindow: Window not in workspace - adding with size ${realWidth}x${realHeight} (preferred=${!!overrideSize || !!WindowState.get(window, 'preferredSize')})`);
+            Logger.log(`canFitWindow: Window not in workspace - adding with size ${realWidth}x${realHeight} (preferred=${!!overrideSize || !!WindowState.get(window, 'preferredSize')})`);
             
             const newWindowDescriptor = new WindowDescriptor(window, windows.length);
             newWindowDescriptor.width = realWidth;
@@ -1973,7 +1905,7 @@ export const TilingManager = GObject.registerClass({
         }
         
         if (windowAlreadyInWorkspace) {
-            Logger.log(`[MOSAIC WM] canFitWindow: Window already in workspace - checking current layout`);
+            Logger.log(`canFitWindow: Window already in workspace - checking current layout`);
             // Update descriptor size to match reality or override
             const existingDescriptor = windows.find(w => w.id === newWindowId);
             if (existingDescriptor) {
@@ -2006,7 +1938,7 @@ export const TilingManager = GObject.registerClass({
                               WindowState.get(window, 'learnedMinSize');
                               
         if (preferredSize) {
-            Logger.log(`[MOSAIC WM] restorePreferredSize: Restoring window ${window.get_id()} to ${preferredSize.width}x${preferredSize.height}`);
+            Logger.log(`restorePreferredSize: Restoring window ${window.get_id()} to ${preferredSize.width}x${preferredSize.height}`);
             const frame = window.get_frame_rect();
             window.move_resize_frame(false, frame.x, frame.y, preferredSize.width, preferredSize.height);
             
@@ -2015,7 +1947,7 @@ export const TilingManager = GObject.registerClass({
             WindowState.set(window, 'isSmartResizing', false);
             WindowState.set(window, 'targetSmartResizeSize', null);
         } else {
-            Logger.log(`[MOSAIC WM] restorePreferredSize: No preferred size found for ${window.get_id()}`);
+            Logger.log(`restorePreferredSize: No preferred size found for ${window.get_id()}`);
         }
     }
 
@@ -2024,7 +1956,7 @@ export const TilingManager = GObject.registerClass({
         if (!WindowState.has(window, 'originalSize')) {
             const frame = window.get_frame_rect();
             WindowState.set(window, 'originalSize', { width: frame.width, height: frame.height });
-            Logger.log(`[MOSAIC WM] saveOriginalSize: Saved ${window.get_id()} as ${frame.width}x${frame.height}`);
+            Logger.log(`saveOriginalSize: Saved ${window.get_id()} as ${frame.width}x${frame.height}`);
         }
     }
 
@@ -2032,21 +1964,21 @@ export const TilingManager = GObject.registerClass({
     // This is the TARGET size the window wants to be
      
     savePreferredSize(window) {
-        // CRITICAL: Skip - smart resize sets preferredSize in commitResizes()
-        if (WindowState.get(window, 'isSmartResizing')) {
-            Logger.log(`[MOSAIC WM] savePreferredSize: Skipping for ${window.get_id()} - during smart resize`);
+        // Skip - smart resize sets preferredSize in commitResizes()
+        if (WindowState.get(window, 'isSmartResizing') || WindowState.get(window, 'isReverseSmartResizing')) {
+            Logger.log(`savePreferredSize: Skipping for ${window.get_id()} - during (reverse) smart resize`);
             return;
         }
 
-        // CRITICAL: Skip - smart resize already set preferredSize (don't override)
+        // Skip - smart resize already set preferredSize (don't override)
         if (WindowState.get(window, 'isConstrainedByMosaic')) {
-            Logger.log(`[MOSAIC WM] savePreferredSize: Skipping for ${window.get_id()} - already constrained by smart resize`);
+            Logger.log(`savePreferredSize: Skipping for ${window.get_id()} - already constrained by smart resize`);
             return;
         }
 
-        // CRITICAL: Skip sacred windows - managed by maximizedUndoInfo
+        // Skip sacred windows - managed by maximizedUndoInfo
         if (this._windowingManager.isMaximizedOrFullscreen(window)) {
-            Logger.log(`[MOSAIC WM] savePreferredSize: Skipping for ${window.get_id()} - sacred window (managed by maximizedUndoInfo)`);
+            Logger.log(`savePreferredSize: Skipping for ${window.get_id()} - sacred window (managed by maximizedUndoInfo)`);
             return;
         }
 
@@ -2059,14 +1991,14 @@ export const TilingManager = GObject.registerClass({
         if (size && size.width > 0 && size.height > 0) {
             // Block save during maximize/fullscreen transitions
             if (WindowState.get(window, 'isEnteringSacred')) {
-                Logger.log(`[MOSAIC WM] savePreferredSize: Save blocked by sacred transition flag for ${window.get_id()}`);
+                Logger.log(`savePreferredSize: Save blocked by sacred transition flag for ${window.get_id()}`);
                 return;
             }
 
             WindowState.set(window, 'preferredSize', size);
-            Logger.log(`[MOSAIC WM] savePreferredSize: Window ${window.get_id()} target size updated to ${size.width}x${size.height}`);
+            Logger.log(`savePreferredSize: Window ${window.get_id()} target size updated to ${size.width}x${size.height}`);
         } else {
-            Logger.log(`[MOSAIC WM] savePreferredSize: Could not determine valid preferred size for ${window.get_id()}`);
+            Logger.log(`savePreferredSize: Could not determine valid preferred size for ${window.get_id()}`);
         }
     }
     
@@ -2075,7 +2007,7 @@ export const TilingManager = GObject.registerClass({
     clearPreferredSize(window) {
         if (WindowState.has(window, 'preferredSize')) {
             WindowState.remove(window, 'preferredSize');
-            Logger.log(`[MOSAIC WM] clearPreferredSize: Removed ${window.get_id()}`);
+            Logger.log(`clearPreferredSize: Removed ${window.get_id()}`);
         }
     }
 
@@ -2110,18 +2042,18 @@ export const TilingManager = GObject.registerClass({
         }
         
         if (shrunkWindows.length === 0) {
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: No shrunk windows to restore`);
+            Logger.log(`tryRestoreWindowSizes: No shrunk windows to restore`);
             return false;
         }
         
-        Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Found ${shrunkWindows.length} shrunk windows`);
+        Logger.log(`tryRestoreWindowSizes: Found ${shrunkWindows.length} shrunk windows`);
         
         // Determine orientation (use width for landscape, height for portrait)
         const isLandscape = workArea.width > workArea.height;
         
         // Check if we have valid freed dimensions, otherwise calculate them
         if (freedWidth === undefined || freedHeight === undefined || isNaN(freedWidth) || isNaN(freedHeight)) {
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Freed dimensions undefined/NaN - calculating from work area`);
+            Logger.log(`tryRestoreWindowSizes: Freed dimensions undefined/NaN - calculating from work area`);
             
             // Calculate currently used space by remaining windows
             let usedWidth = 0;
@@ -2151,9 +2083,9 @@ export const TilingManager = GObject.registerClass({
             freedWidth = Math.max(0, workArea.width - usedWidth - spacing);
             freedHeight = Math.max(0, workArea.height - usedHeight - spacing);
             
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Calculated incremental available space: ${freedWidth}x${freedHeight}`);
+            Logger.log(`tryRestoreWindowSizes: Calculated incremental available space: ${freedWidth}x${freedHeight}`);
         } else {
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: ${freedWidth}px width and ${freedHeight}px height freed`);
+            Logger.log(`tryRestoreWindowSizes: ${freedWidth}px width and ${freedHeight}px height freed`);
         }
 
         // Calculate total deficits for both dimensions
@@ -2161,7 +2093,7 @@ export const TilingManager = GObject.registerClass({
         const totalHeightDeficit = shrunkWindows.reduce((sum, w) => sum + w.heightDeficit, 0);
         
         if (totalWidthDeficit <= 0 && totalHeightDeficit <= 0) {
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: No deficit to fill`);
+            Logger.log(`tryRestoreWindowSizes: No deficit to fill`);
             return false;
         }
         
@@ -2171,7 +2103,7 @@ export const TilingManager = GObject.registerClass({
         const gainFactorW = totalWidthDeficit > 0 ? Math.min(1.0, freedWidth / totalWidthDeficit) : 1.0;
         const gainFactorH = totalHeightDeficit > 0 ? Math.min(1.0, freedHeight / totalHeightDeficit) : 1.0;
         
-        Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Factors: W=${gainFactorW.toFixed(2)}, H=${gainFactorH.toFixed(2)}`);
+        Logger.log(`tryRestoreWindowSizes: Factors: W=${gainFactorW.toFixed(2)}, H=${gainFactorH.toFixed(2)}`);
 
         // Simulating the new state if we applied the gain
         const simulatedWindows = windows.map(w => {
@@ -2197,7 +2129,7 @@ export const TilingManager = GObject.registerClass({
         
         if (!tile_result.overflow) {
             // It fits! Apply the restoration.
-            Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Restoration possible`);
+            Logger.log(`tryRestoreWindowSizes: Restoration possible`);
             
             for (const sim of simulatedWindows) {
                 const w = windows.find(win => win.get_id() === sim.id);
@@ -2222,7 +2154,7 @@ export const TilingManager = GObject.registerClass({
             }
             return true;
         } else {
-             Logger.log(`[MOSAIC WM] tryRestoreWindowSizes: Restoration would cause overflow - waiting for more space`);
+             Logger.log(`tryRestoreWindowSizes: Restoration would cause overflow - waiting for more space`);
              
              // Ensure flags are cleared if we failed
              for (const w of windows) {
@@ -2332,7 +2264,7 @@ export const TilingManager = GObject.registerClass({
                 
                 if (result.success) {
                     // ✅ SUCCESS: Todas as janelas couberam!
-                    Logger.log(`[SMART RESIZE] ✓ SUCCESS at iteration ${iterator.iteration}`);
+                    Logger.log(`[SMART RESIZE] SUCCESS at iteration ${iterator.iteration}`);
                     iterator.commitResizes();
                     
                     // Limpar flag de smart resizing ANTES de retornar
@@ -2344,7 +2276,7 @@ export const TilingManager = GObject.registerClass({
                 
                 if (!result.shouldRetry) {
                     // ❌ OVERFLOW final: Cannot fit even with all windows at minimum
-                    Logger.log(`[SMART RESIZE] ✗ OVERFLOW: Cannot fit even at minimum - applying reverse resize`);
+                    Logger.log(`[SMART RESIZE] OVERFLOW: Cannot fit even at minimum - applying reverse resize`);
                     await iterator.revertAll();
                     
                     // Wait for Mutter to apply reverts (event-driven with timeout)
@@ -2401,11 +2333,11 @@ class WindowDescriptor {
         if (targetSize) {
             this.width = targetSize.width;
             this.height = targetSize.height;
-            Logger.log(`[MOSAIC WM] WindowDescriptor: Using targetRestoredSize ${this.width}x${this.height} for ${meta_window.get_id()}`);
+            Logger.log(`WindowDescriptor: Using targetRestoredSize ${this.width}x${this.height} for ${meta_window.get_id()}`);
         } else if (smartResizeSize) {
             this.width = smartResizeSize.width;
             this.height = smartResizeSize.height;
-            Logger.log(`[MOSAIC WM] WindowDescriptor: Using targetSmartResizeSize ${this.width}x${this.height} for ${meta_window.get_id()}`);
+            Logger.log(`WindowDescriptor: Using targetSmartResizeSize ${this.width}x${this.height} for ${meta_window.get_id()}`);
         } else {
             // Use actual frame dimensions — no hardcoded fallback
             this.width = frame.width > 0 ? frame.width : 1;
@@ -2435,7 +2367,7 @@ class WindowDescriptor {
                 const positionChanged = Math.abs(currentRect.x - x) > 5 || Math.abs(currentRect.y - y) > 5;
                 const sizeChanged = Math.abs(currentRect.width - this.width) > 5 || Math.abs(currentRect.height - this.height) > 5;
                 
-                Logger.log(`[MOSAIC WM] draw (drag): id=${this.id}, target=(${x},${y}), current=(${currentRect.x},${currentRect.y}), posChanged=${positionChanged}`);
+                Logger.log(`draw (drag): id=${this.id}, target=(${x},${y}), current=(${currentRect.x},${currentRect.y}), posChanged=${positionChanged}`);
                 
                 if (positionChanged || sizeChanged) {
                     WindowState.set(window, 'isConstrainedByMosaic', true);
@@ -2460,7 +2392,7 @@ class WindowDescriptor {
             window.move_resize_frame(false, x, y, this.width, this.height);
         }
     } else {
-        Logger.warn(`[MOSAIC WM] Could not find window with ID ${this.id} for drawing`);
+        Logger.warn(`Could not find window with ID ${this.id} for drawing`);
     }
 }
 }
@@ -2487,7 +2419,7 @@ Level.prototype.draw_horizontal = function(meta_windows, work_area, y, masks, is
         const drawY = window.targetY !== undefined ? window.targetY : y + y_offset;
         
         if (!dryRun)
-            Logger.log(`[MOSAIC WM] Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
+            Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
         
         if (window.metaWindow) {
             ComputedLayouts.set(window.metaWindow, { x: drawX, y: drawY, width: window.width, height: window.height });
@@ -2506,7 +2438,7 @@ Level.prototype.draw_vertical = function(meta_windows, x, masks, isDragging, dra
         const drawY = window.targetY !== undefined ? window.targetY : y;
         
         if (!dryRun)
-            Logger.log(`[MOSAIC WM] Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
+            Logger.log(`Window ${window.id} target: ${drawX},${drawY} (${window.width}x${window.height})`);
         
         if (window.metaWindow) {
             ComputedLayouts.set(window.metaWindow, { x: drawX, y: drawY, width: window.width, height: window.height });

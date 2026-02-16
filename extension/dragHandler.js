@@ -5,11 +5,9 @@
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Clutter from 'gi://Clutter';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Logger from './logger.js';
 import { TileZone } from './constants.js';
 import * as constants from './constants.js';
-import * as WindowState from './windowState.js';
 import { afterAnimations } from './timing.js';
 
 import GObject from 'gi://GObject';
@@ -61,7 +59,7 @@ export const DragHandler = GObject.registerClass({
     moveGhostWindowsToOverflow() {
         if (!this._edgeTileGhostWindows || this._edgeTileGhostWindows.length === 0) return;
         
-        Logger.log(`[MOSAIC WM] Moving ${this._edgeTileGhostWindows.length} ghost windows to overflow`);
+        Logger.log(`Moving ${this._edgeTileGhostWindows.length} ghost windows to overflow`);
         
         for (const win of this._edgeTileGhostWindows) {
             const actor = win.get_compositor_private();
@@ -82,7 +80,7 @@ export const DragHandler = GObject.registerClass({
         }
         
         if (grabpo === 1 && !this.windowingManager.isExcluded(window)) {
-            Logger.log(`[MOSAIC WM] Edge tiling: grab begin`);
+            Logger.log(`Edge tiling: grab begin`);
             this._draggedWindow = window;
             
             const windowState = this.edgeTilingManager.getWindowState(window);
@@ -90,7 +88,7 @@ export const DragHandler = GObject.registerClass({
             // Initialize _currentZone with window's zone if it's already edge-tiled
             if (windowState && windowState.zone !== TileZone.NONE) {
                 this._currentZone = windowState.zone;
-                Logger.log(`[MOSAIC WM] Edge tiling: window was in zone ${windowState.zone}, initializing _currentZone`);
+                Logger.log(`Edge tiling: window was in zone ${windowState.zone}, initializing _currentZone`);
                 
                 this._skipNextTiling = window.get_id();
                 this._restoringFromEdgeTile = true;
@@ -102,7 +100,7 @@ export const DragHandler = GObject.registerClass({
                         return GLib.SOURCE_REMOVE;
                     });
                     
-                    Logger.log(`[MOSAIC WM] Edge tiling: restoration complete, checking if drag still active`);
+                    Logger.log(`Edge tiling: restoration complete, checking if drag still active`);
                     this._skipNextTiling = null;
                     this._currentZone = TileZone.NONE; // Reset so window doesn't get re-tiled on release
                     
@@ -111,14 +109,14 @@ export const DragHandler = GObject.registerClass({
                     const isButtonPressed = (mods & Clutter.ModifierType.BUTTON1_MASK) !== 0;
                     
                     if (!isButtonPressed) {
-                        Logger.log(`[MOSAIC WM] Edge tiling: button released during restoration, skipping startDrag`);
+                        Logger.log(`Edge tiling: button released during restoration, skipping startDrag`);
                         this._draggedWindow = null;
                         
                         // Retile the workspace so the window returns to mosaic position
                         const workspace = window.get_workspace();
                         const monitor = window.get_monitor();
                         if (workspace && monitor !== null) {
-                            Logger.log(`[MOSAIC WM] Edge tiling: triggering retile after quick release`);
+                            Logger.log(`Edge tiling: triggering retile after quick release`);
                             this.tilingManager.tileWorkspaceWindows(workspace, window, monitor, false);
                         }
                         return;
@@ -134,7 +132,7 @@ export const DragHandler = GObject.registerClass({
                          const fits = this.tilingManager.canFitWindow(window, workspace, monitor, true);
                          
                          if (!fits) {
-                             Logger.log(`[MOSAIC WM] Edge tile exit: window doesn't fit - applying overflow opacity`);
+                             Logger.log(`Edge tile exit: window doesn't fit - applying overflow opacity`);
                              const actor = window.get_compositor_private();
                              if (actor) {
                                  actor.opacity = 128;
@@ -144,7 +142,7 @@ export const DragHandler = GObject.registerClass({
                              this.drawingManager.hideTilePreview();
                              this.drawingManager.removeBoxes();
                          } else {
-                             Logger.log(`[MOSAIC WM] _grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
+                             Logger.log(`_grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
                              this.reorderingManager.startDrag(window);
                          }
                     }
@@ -155,14 +153,14 @@ export const DragHandler = GObject.registerClass({
             }
             
             // Connect signal-based listeners for edge tiling (replaces polling)
-            Logger.log(`[MOSAIC WM] Connecting signal-based edge tiling listeners`);
+            Logger.log(`Connecting signal-based edge tiling listeners`);
             this._dragPositionChangedId = this._draggedWindow.connect('position-changed', this._onDragPositionChanged.bind(this));
         }
         
         if ( !this.windowingManager.isExcluded(window) &&
             (grabpo === Meta.GrabOp.MOVING || grabpo === Meta.GrabOp.KEYBOARD_MOVING) && 
             !(this.windowingManager.isMaximizedOrFullscreen(window))) {
-            Logger.log(`[MOSAIC WM] _grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
+            Logger.log(`_grabOpBeginHandler: calling startDrag for window ${window.get_id()}`);
             this.reorderingManager.startDrag(window);
         }
     };
@@ -172,7 +170,7 @@ export const DragHandler = GObject.registerClass({
         
         // Handle drag overflow - window that was marked as not fitting
         if (this._dragOverflowWindow && this._dragOverflowWindow === window) {
-            Logger.log(`[MOSAIC WM] Drag ended with overflow window - moving to new workspace`);
+            Logger.log(`Drag ended with overflow window - moving to new workspace`);
             const actor = this._dragOverflowWindow.get_compositor_private();
             if (actor) actor.opacity = 255; // Restore opacity
             
@@ -197,7 +195,7 @@ export const DragHandler = GObject.registerClass({
                 try {
                     window.disconnect(this._dragPositionChangedId);
                 } catch (e) {
-                    Logger.log(`[MOSAIC WM] Failed to disconnect signal on drag end (overflow): ${e.message}`);
+                    Logger.log(`Failed to disconnect signal on drag end (overflow): ${e.message}`);
                 }
                 this._dragPositionChangedId = 0;
             }
@@ -213,13 +211,13 @@ export const DragHandler = GObject.registerClass({
                 try {
                     window.disconnect(this._dragPositionChangedId);
                 } catch (e) {
-                    Logger.log(`[MOSAIC WM] Failed to disconnect signal on drag end: ${e.message}`);
+                    Logger.log(`Failed to disconnect signal on drag end: ${e.message}`);
                 }
                 this._dragPositionChangedId = 0;
             }
             
             if (this._currentZone !== TileZone.NONE) {
-                Logger.log(`[MOSAIC WM] Edge tiling: applying zone ${this._currentZone}`);
+                Logger.log(`Edge tiling: applying zone ${this._currentZone}`);
                 const workspace = window.get_workspace();
                 const monitor = window.get_monitor();
                 const workArea = workspace.get_work_area_for_monitor(monitor);
@@ -227,12 +225,12 @@ export const DragHandler = GObject.registerClass({
                 const occupiedWindow = this.edgeTilingManager.getWindowInZone(this._currentZone, workspace, monitor);
                 
                 if (occupiedWindow && occupiedWindow.get_id() !== window.get_id()) {
-                    Logger.log(`[MOSAIC WM] DnD: zone ${this._currentZone} occupied by ${occupiedWindow.get_id()}, swapping`);
+                    Logger.log(`DnD: zone ${this._currentZone} occupied by ${occupiedWindow.get_id()}, swapping`);
                     
                     this._skipNextTiling = window.get_id();
                     
                     const success = this.swappingManager.swapWindows(window, occupiedWindow, this._currentZone, workspace, monitor);
-                    Logger.log(`[MOSAIC WM] DnD swap result = ${success}`);
+                    Logger.log(`DnD swap result = ${success}`);
                     
                     if (success) {
                         GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RETILE_DELAY_MS, () => {
@@ -243,17 +241,17 @@ export const DragHandler = GObject.registerClass({
                         this._skipNextTiling = null;
                     }
                 } else {
-                    Logger.log(`[MOSAIC WM] DnD: zone ${this._currentZone} empty, applying tile`);
+                    Logger.log(`DnD: zone ${this._currentZone} empty, applying tile`);
                     
                     this._skipNextTiling = window.get_id();
                     
                     const success = this.edgeTilingManager.applyTile(window, this._currentZone, workArea);
-                    Logger.log(`[MOSAIC WM] Edge tiling: apply result = ${success}`);
+                    Logger.log(`Edge tiling: apply result = ${success}`);
                     
                     if (success) {
                         // Move ghost windows to overflow after edge tile is applied
                         if (this._edgeTileGhostWindows.length > 0) {
-                            Logger.log(`[MOSAIC WM] Edge tile confirmed - moving ${this._edgeTileGhostWindows.length} ghost windows to overflow`);
+                            Logger.log(`Edge tile confirmed - moving ${this._edgeTileGhostWindows.length} ghost windows to overflow`);
                             this.moveGhostWindowsToOverflow();
                         }
                         
@@ -323,14 +321,14 @@ export const DragHandler = GObject.registerClass({
             return Clutter.EVENT_PROPAGATE;
         }
 
-        Logger.log(`[MOSAIC WM] Global button release detected - cleaning up drag`);
+        Logger.log(`Global button release detected - cleaning up drag`);
         
         if (this._currentZone !== TileZone.NONE) {
             const workspace = this._draggedWindow.get_workspace();
             const monitor = this._draggedWindow.get_monitor();
             const workArea = workspace.get_work_area_for_monitor(monitor);
             
-            Logger.log(`[MOSAIC WM] Applying zone ${this._currentZone} on button release`);
+            Logger.log(`Applying zone ${this._currentZone} on button release`);
             this.edgeTilingManager.applyTile(this._draggedWindow, this._currentZone, workArea);
         }
         
@@ -360,7 +358,7 @@ export const DragHandler = GObject.registerClass({
             try {
                 draggedWindow.disconnect(this._dragPositionChangedId);
             } catch (e) {
-                Logger.log(`[MOSAIC WM] Failed to disconnect drag signal: ${e.message}`);
+                Logger.log(`Failed to disconnect drag signal: ${e.message}`);
             }
             this._dragPositionChangedId = 0;
         }
@@ -398,7 +396,7 @@ export const DragHandler = GObject.registerClass({
              }
              
              if (zone !== TileZone.NONE && zone !== this._currentZone) {
-                 Logger.log(`[MOSAIC WM] Edge tiling: detected zone ${zone}`);
+                 Logger.log(`Edge tiling: detected zone ${zone}`);
                  this._currentZone = zone;
                  this.edgeTilingManager.setEdgeTilingActive(true, this._draggedWindow);
                  this.drawingManager.showTilePreview(zone, workArea, this._draggedWindow);
@@ -424,7 +422,7 @@ export const DragHandler = GObject.registerClass({
                      }
                  }
              } else if (zone === TileZone.NONE && this._currentZone !== TileZone.NONE) {
-                 Logger.log(`[MOSAIC WM] Edge tiling: exiting zone`);
+                 Logger.log(`Edge tiling: exiting zone`);
                  this._currentZone = TileZone.NONE;
                  this.edgeTilingManager.setEdgeTilingActive(false, null);
                  this.drawingManager.hideTilePreview();
@@ -447,7 +445,7 @@ export const DragHandler = GObject.registerClass({
             try {
                 this._draggedWindow.disconnect(this._dragPositionChangedId);
             } catch (e) {
-                Logger.log(`[MOSAIC WM] DragHandler cleanup failed: ${e.message}`);
+                Logger.log(`DragHandler cleanup failed: ${e.message}`);
             }
             this._dragPositionChangedId = 0;
         }

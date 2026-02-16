@@ -4,7 +4,6 @@
 
 import * as Logger from './logger.js';
 import Gio from 'gi://Gio';
-import GLib from 'gi://GLib';
 
 export class SettingsOverrider {
     #overrides;
@@ -30,7 +29,7 @@ export class SettingsOverrider {
         
         // Apply override
         settings.set_value(key, value);
-        Logger.log(`[MOSAIC WM] Overriding ${schemaId}.${key}`);
+        Logger.log(`Overriding ${schemaId}.${key}`);
     }
     
     clear() {
@@ -44,13 +43,13 @@ export class SettingsOverrider {
                 for (const [key, originalValue] of overrides) {
                     try {
                         settings.set_value(key, originalValue);
-                        Logger.log(`[MOSAIC WM] Restored ${schemaId}.${key} to original value`);
+                        Logger.log(`Restored ${schemaId}.${key} to original value`);
                     } catch (e) {
-                        Logger.warn(`[MOSAIC WM] Failed to restore ${schemaId}.${key}: ${e.message}`);
+                        Logger.warn(`Failed to restore ${schemaId}.${key}: ${e.message}`);
                     }
                 }
             } catch (e) {
-                Logger.warn(`[MOSAIC WM] Failed to create settings for ${schemaId}: ${e.message}`);
+                Logger.warn(`Failed to create settings for ${schemaId}: ${e.message}`);
             }
         }
         

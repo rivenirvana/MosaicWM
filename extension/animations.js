@@ -129,7 +129,7 @@ export const AnimationsManager = GObject.registerClass({
         
         const windowActor = window.get_compositor_private();
         if (!windowActor) {
-            Logger.log(`[MOSAIC WM] No actor for window ${window.get_id()}, skipping animation`);
+            Logger.log(`No actor for window ${window.get_id()}, skipping animation`);
             window.move_resize_frame(false, targetRect.x, targetRect.y, targetRect.width, targetRect.height);
             if (onComplete) onComplete();
             return;
@@ -313,7 +313,7 @@ export const AnimationsManager = GObject.registerClass({
                              Math.abs(currentRect.width - rect.width) > constants.ANIMATION_DIFF_THRESHOLD ||
                              Math.abs(currentRect.height - rect.height) > constants.ANIMATION_DIFF_THRESHOLD;
             
-            Logger.log(`[MOSAIC WM] animateReTiling: single window, current=(${currentRect.x},${currentRect.y}), target=(${rect.x},${rect.y}), needsMove=${needsMove}`);
+            Logger.log(`animateReTiling: single window, current=(${currentRect.x},${currentRect.y}), target=(${rect.x},${rect.y}), needsMove=${needsMove}`);
             
             if (!needsMove) {
                 window.move_resize_frame(false, rect.x, rect.y, rect.width, rect.height);

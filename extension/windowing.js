@@ -137,7 +137,7 @@ export const WindowingManager = GObject.registerClass({
         const tileState = this._edgeTilingManager.getWindowState(edgeTiledWindow);
         
         if (!tileState || tileState.zone === TileZone.NONE) {
-            Logger.log('[MOSAIC WM] Existing window is not edge-tiled, cannot tile');
+            Logger.log('Existing window is not edge-tiled, cannot tile');
             return false;
         }
         
@@ -151,7 +151,7 @@ export const WindowingManager = GObject.registerClass({
                    tileState.zone === TileZone.BOTTOM_RIGHT) {
             direction = 'left';
         } else {
-            Logger.log('[MOSAIC WM] Unsupported edge tile zone for dual-tiling');
+            Logger.log('Unsupported edge tile zone for dual-tiling');
             return false;
         }
         
@@ -159,7 +159,7 @@ export const WindowingManager = GObject.registerClass({
         const existingWidth = existingFrame.width;
         const availableWidth = workArea.width - existingWidth;
         
-        Logger.log(`[MOSAIC WM] Auto-tiling: existing window width=${existingWidth}px, available=${availableWidth}px`);
+        Logger.log(`Auto-tiling: existing window width=${existingWidth}px, available=${availableWidth}px`);
         
         let targetX, targetY, targetWidth, targetHeight;
         
@@ -185,17 +185,17 @@ export const WindowingManager = GObject.registerClass({
             const state = this._edgeTilingManager.getWindowState(window);
             if (state) {
                 state.zone = zone;
-                Logger.log(`[MOSAIC WM] Dual-tiling: Updated window ${window.get_id()} state to zone ${zone}`);
+                Logger.log(`Dual-tiling: Updated window ${window.get_id()} state to zone ${zone}`);
                 
                 this._edgeTilingManager.setupResizeListener(window);
             }
             
             this._edgeTilingManager.registerAutoTileDependency(window.get_id(), edgeTiledWindow.get_id());
             
-            Logger.log(`[MOSAIC WM] Successfully dual-tiled window ${window.get_wm_class()} to ${direction} (${targetWidth}x${targetHeight})`);
+            Logger.log(`Successfully dual-tiled window ${window.get_wm_class()} to ${direction} (${targetWidth}x${targetHeight})`);
             return true;
         } catch (error) {
-            Logger.log(`[MOSAIC WM] Failed to tile window: ${error.message}`);
+            Logger.log(`Failed to tile window: ${error.message}`);
             if (previousWorkspace) {
                 window.change_workspace(previousWorkspace);
             }
@@ -222,30 +222,30 @@ export const WindowingManager = GObject.registerClass({
         
         const nextIndex = currentIndex + 1;
         
-        Logger.log(`[MOSAIC WM] moveOversizedWindow: origin=${currentIndex}, next=${nextIndex}`);
+        Logger.log(`moveOversizedWindow: origin=${currentIndex}, next=${nextIndex}`);
         
         let target_workspace = null;
         
         if (nextIndex < workspaceManager.get_n_workspaces()) {
             const nextWorkspace = workspaceManager.get_workspace_by_index(nextIndex);
             
-            Logger.log(`[MOSAIC WM] Checking if window ${window.get_id()} fits in workspace ${nextIndex}`);
+            Logger.log(`Checking if window ${window.get_id()} fits in workspace ${nextIndex}`);
             
             if (this._tilingManager && this._tilingManager.canFitWindow(window, nextWorkspace, monitor)) {
                 target_workspace = nextWorkspace;
-                Logger.log(`[MOSAIC WM] Window fits in existing workspace ${nextIndex}`);
+                Logger.log(`Window fits in existing workspace ${nextIndex}`);
             } else {
-                Logger.log(`[MOSAIC WM] Window does NOT fit in workspace ${nextIndex} - creating new`);
+                Logger.log(`Window does NOT fit in workspace ${nextIndex} - creating new`);
             }
         } else {
-            Logger.log(`[MOSAIC WM] No workspace at index ${nextIndex} - creating new`);
+            Logger.log(`No workspace at index ${nextIndex} - creating new`);
         }
         
         // Create new workspace if next doesn't exist or can't fit
         if (!target_workspace) {
             target_workspace = workspaceManager.append_new_workspace(false, this.getTimestamp());
             workspaceManager.reorder_workspace(target_workspace, nextIndex);
-            Logger.log(`[MOSAIC WM] Created workspace at position ${nextIndex}`);
+            Logger.log(`Created workspace at position ${nextIndex}`);
         }
         
         const previous_workspace = window.get_workspace();
@@ -264,7 +264,7 @@ export const WindowingManager = GObject.registerClass({
         GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             const workspaceIndex = target_workspace.index();
             if (workspaceIndex < 0 || workspaceIndex >= workspaceManager.get_n_workspaces()) {
-                Logger.warn(`[MOSAIC WM] Workspace no longer valid: ${workspaceIndex}`);
+                Logger.warn(`Workspace no longer valid: ${workspaceIndex}`);
                 return GLib.SOURCE_REMOVE;
             }
             
@@ -287,7 +287,7 @@ export const WindowingManager = GObject.registerClass({
                     const windowInWorkspace = workspaceWindows.some(w => w.get_id() === window.get_id());
                     
                     if (frame.width > 0 && frame.height > 0 && windowInWorkspace) {
-                        Logger.log(`[MOSAIC WM] moveOversizedWindow: window geometry ready (${frame.width}x${frame.height}), waiting for animation then retiling`);
+                        Logger.log(`moveOversizedWindow: window geometry ready (${frame.width}x${frame.height}), waiting for animation then retiling`);
                         // Wait for workspace switch animation to complete before tiling
                         afterWorkspaceSwitch(() => {
                             this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
@@ -306,7 +306,7 @@ export const WindowingManager = GObject.registerClass({
                             const positionError = Math.abs(finalFrame.x - expectedX) + Math.abs(finalFrame.y - expectedY);
                             
                             if (positionError > 10) {
-                                Logger.log(`[MOSAIC WM] moveOversizedWindow: window mispositioned by ${positionError}px, retiling`);
+                                Logger.log(`moveOversizedWindow: window mispositioned by ${positionError}px, retiling`);
                                 this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
                             }
                             
@@ -327,7 +327,7 @@ export const WindowingManager = GObject.registerClass({
                     
                     // Prevent infinite loop - give up after max attempts
                     if (attempts >= maxAttempts) {
-                        Logger.log(`[MOSAIC WM] moveOversizedWindow: timeout waiting for geometry, forcing retile`);
+                        Logger.log(`moveOversizedWindow: timeout waiting for geometry, forcing retile`);
                         afterWorkspaceSwitch(() => {
                             this._tilingManager.tileWorkspaceWindows(target_workspace, null, monitor);
                         }, this._timeoutRegistry);
@@ -337,7 +337,7 @@ export const WindowingManager = GObject.registerClass({
                         return GLib.SOURCE_REMOVE;
                     }
                     
-                    Logger.log(`[MOSAIC WM] moveOversizedWindow: waiting for geometry (${frame.width}x${frame.height})`);
+                    Logger.log(`moveOversizedWindow: waiting for geometry (${frame.width}x${frame.height})`);
                     return GLib.SOURCE_CONTINUE;
                 };
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, waitForWindowGeometry);
@@ -396,7 +396,7 @@ export const WindowingManager = GObject.registerClass({
         
         if (meta_window.get_transient_for() !== null) {
             const wmClass = meta_window.get_wm_class();
-            Logger.log(`[MOSAIC WM] Excluding transient/modal window: ${wmClass}`);
+            Logger.log(`Excluding transient/modal window: ${wmClass}`);
             return false;
         }
         
@@ -419,7 +419,7 @@ export const WindowingManager = GObject.registerClass({
         
         // Skip if workspace is already the final one (nothing to navigate from)
         if (currentIndex === lastWorkspaceIndex) {
-            Logger.log('[MOSAIC WM] renavigate: Already on final workspace, going left');
+            Logger.log('renavigate: Already on final workspace, going left');
             const leftNeighbor = workspace.get_neighbor(Meta.MotionDirection.LEFT);
             if (leftNeighbor && leftNeighbor.index() !== currentIndex) {
                 leftNeighbor.activate(this.getTimestamp());
@@ -432,7 +432,7 @@ export const WindowingManager = GObject.registerClass({
         if (lastVisitedIndex !== null && lastVisitedIndex !== currentIndex && lastVisitedIndex !== lastWorkspaceIndex) {
             const lastVisited = workspaceManager.get_workspace_by_index(lastVisitedIndex);
             if (lastVisited && lastVisited.index() >= 0 && lastVisited.index() < nWorkspaces) {
-                Logger.log(`[MOSAIC WM] renavigate: Going to last visited workspace ${lastVisitedIndex}`);
+                Logger.log(`renavigate: Going to last visited workspace ${lastVisitedIndex}`);
                 lastVisited.activate(this.getTimestamp());
                 this.showWorkspaceSwitcher(lastVisited, monitorIndex);
                 return;
@@ -451,7 +451,7 @@ export const WindowingManager = GObject.registerClass({
         }
         
         if (targetWorkspace && targetWorkspace.index() !== currentIndex && condition) {
-            Logger.log(`[MOSAIC WM] renavigate: Falling back to neighbor workspace ${targetWorkspace.index()}`);
+            Logger.log(`renavigate: Falling back to neighbor workspace ${targetWorkspace.index()}`);
             targetWorkspace.activate(this.getTimestamp());
             this.showWorkspaceSwitcher(targetWorkspace, monitorIndex);
         }
@@ -467,7 +467,7 @@ export const WindowingManager = GObject.registerClass({
             monitorIndex = Main.layoutManager.primaryIndex;
         }
         
-        Logger.log(`[MOSAIC WM] showWorkspaceSwitcher: showing WorkspaceSwitcherPopup for workspace ${index} on monitor ${monitorIndex}`);
+        Logger.log(`showWorkspaceSwitcher: showing WorkspaceSwitcherPopup for workspace ${index} on monitor ${monitorIndex}`);
         
         // Use WorkspaceSwitcherPopup for native workspace switching indicator (dots/grid)
         try {
@@ -485,7 +485,7 @@ export const WindowingManager = GObject.registerClass({
 
             Main.wm._workspaceSwitcherPopup.display(index);
         } catch (e) {
-            Logger.warn(`[MOSAIC WM] WorkspaceSwitcherPopup failed: ${e.message}`);
+            Logger.warn(`WorkspaceSwitcherPopup failed: ${e.message}`);
         }
     }
     destroy() {

@@ -2,7 +2,7 @@ const DEBUG = true;
 
 export function log(...args) {
     if (DEBUG) {
-        console.log('[MOSAIC INFO]', ...args);
+        console.log('[MOSAIC WM]', ...args);
     }
 }
 

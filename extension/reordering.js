@@ -167,7 +167,7 @@ export const ReorderingManager = GObject.registerClass({
     startDrag(meta_window) {
         if (!this._tilingManager) return;
         
-        Logger.log(`[MOSAIC WM] startDrag called for window ${meta_window.get_id()}`);
+        Logger.log(`startDrag called for window ${meta_window.get_id()}`);
         let workspace = meta_window.get_workspace()
         let monitor = meta_window.get_monitor();
         let meta_windows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
@@ -184,7 +184,7 @@ export const ReorderingManager = GObject.registerClass({
         const edgeTiledIds = edgeTiledWindows.map(s => s.window.get_id());
         
         const nonEdgeTiledMetaWindows = meta_windows.filter(w => !edgeTiledIds.includes(w.get_id()));
-        Logger.log(`[MOSAIC WM] startDrag: Total windows: ${meta_windows.length}, Edge-tiled: ${edgeTiledWindows.length}, Non-edge-tiled: ${nonEdgeTiledMetaWindows.length}`);
+        Logger.log(`startDrag: Total windows: ${meta_windows.length}, Edge-tiled: ${edgeTiledWindows.length}, Non-edge-tiled: ${nonEdgeTiledMetaWindows.length}`);
         
         this._tilingManager.applySwaps(workspace, nonEdgeTiledMetaWindows);
         
@@ -193,7 +193,7 @@ export const ReorderingManager = GObject.registerClass({
         let remainingSpace = null;
         if (edgeTiledWindows.length > 0 && this._edgeTilingManager) {
             remainingSpace = this._edgeTilingManager.calculateRemainingSpace(workspace, monitor);
-            Logger.log(`[MOSAIC WM] startDrag: Remaining space for drag: x=${remainingSpace.x}, y=${remainingSpace.y}, w=${remainingSpace.width}, h=${remainingSpace.height}`);
+            Logger.log(`startDrag: Remaining space for drag: x=${remainingSpace.x}, y=${remainingSpace.y}, w=${remainingSpace.width}, h=${remainingSpace.height}`);
         }
 
         this._tilingManager.createMask(meta_window);
@@ -217,7 +217,7 @@ export const ReorderingManager = GObject.registerClass({
     stopDrag(meta_window, skip_apply, skip_tiling) {
         if (!this._tilingManager) return;
         
-        Logger.log(`[MOSAIC WM] stopDrag called for window ${meta_window.get_id()}, dragStart was: ${this.dragStart}`);
+        Logger.log(`stopDrag called for window ${meta_window.get_id()}, dragStart was: ${this.dragStart}`);
         let workspace = meta_window.get_workspace();
         this.dragStart = false;
         this._rejectedSwap = null;
@@ -240,7 +240,7 @@ export const ReorderingManager = GObject.registerClass({
         if (!skip_tiling) {
             this._tilingManager.tileWorkspaceWindows(workspace, null, meta_window.get_monitor());
         } else {
-            Logger.log(`[MOSAIC WM] stopDrag: Skipping workspace tiling (requested)`);
+            Logger.log(`stopDrag: Skipping workspace tiling (requested)`);
         }
     }
 

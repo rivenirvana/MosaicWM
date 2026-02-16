@@ -4,8 +4,6 @@
 
 import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
 import { ComputedLayouts } from './tiling.js';
-import * as Logger from './logger.js';
-import { getTilingManager } from './extension.js';
 
 // Scales down the layout instead of reorganizing windows (preserves spatial memory)
 export class MosaicLayoutStrategy extends Workspace.LayoutStrategy {

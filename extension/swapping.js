@@ -32,7 +32,7 @@ export const SwappingManager = GObject.registerClass({
         const windowState = this._edgeTilingManager.getWindowState(window);
         const isWindowTiled = windowState && windowState.zone !== TileZone.NONE;
         
-        Logger.log(`[MOSAIC WM] Finding neighbor for window ${window.get_id()} in direction: ${direction}`);
+        Logger.log(`Finding neighbor for window ${window.get_id()} in direction: ${direction}`);
         
         if (isWindowTiled) {
             return this._findNeighborFromTiling(window, windowState.zone, direction, workspace, monitor);
@@ -46,7 +46,7 @@ export const SwappingManager = GObject.registerClass({
         
         if (direction === 'up' || direction === 'down') {
             if (!isQuarter) {
-                Logger.log('[MOSAIC WM] Vertical swap only works for quarter tiles');
+                Logger.log('Vertical swap only works for quarter tiles');
                 return null;
             }
             return this._findVerticalQuarterNeighbor(zone, direction, workspace, monitor);
@@ -278,19 +278,19 @@ export const SwappingManager = GObject.registerClass({
         const workspace = window.get_workspace();
         const monitor = window.get_monitor();
         
-        Logger.log(`[MOSAIC WM] Swapping window ${window.get_id()} in direction: ${direction}`);
+        Logger.log(`Swapping window ${window.get_id()} in direction: ${direction}`);
 
         // Hysteresis: Prevent rapid swapping
         const lastSwap = WindowState.get(window, 'lastSwapTime');
         const now = Date.now();
         if (lastSwap && (now - lastSwap) < 500) {
-             Logger.log(`[MOSAIC WM] Swap throttled for window ${window.get_id()}`);
+             Logger.log(`Swap throttled for window ${window.get_id()}`);
              return false;
         }
         
         const neighbor = this.findNeighbor(window, direction, workspace, monitor);
         if (!neighbor) {
-            Logger.log('[MOSAIC WM] No neighbor found in direction:', direction);
+            Logger.log('No neighbor found in direction:', direction);
             return false;
         }
         
@@ -333,7 +333,7 @@ export const SwappingManager = GObject.registerClass({
     swapWindows(draggedWindow, targetWindow, targetZone, workspace, monitor) {
         if (!this._edgeTilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] DnD Swap: ${draggedWindow.get_id()} → zone ${targetZone}`);
+        Logger.log(`DnD Swap: ${draggedWindow.get_id()} → zone ${targetZone}`);
         
         if (draggedWindow.get_id() === targetWindow.get_id()) return false;
         
@@ -350,7 +350,7 @@ export const SwappingManager = GObject.registerClass({
     _swapMosaicWindows(window1, window2, workspace, monitor) {
         if (!this._tilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] Swapping mosaic windows: ${window1.get_id()} ↔ ${window2.get_id()}`);
+        Logger.log(`Swapping mosaic windows: ${window1.get_id()} ↔ ${window2.get_id()}`);
         
         const id1 = window1.get_id();
         const id2 = window2.get_id();
@@ -368,7 +368,7 @@ export const SwappingManager = GObject.registerClass({
     _swapMosaicWithTiled(mosaicWindow, tiledWindow, tiledZone, workspace, monitor) {
         if (!this._edgeTilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] Swapping mosaic ${mosaicWindow.get_id()} with tiled ${tiledWindow.get_id()}`);
+        Logger.log(`Swapping mosaic ${mosaicWindow.get_id()} with tiled ${tiledWindow.get_id()}`);
         
         this._edgeTilingManager.removeTile(tiledWindow);
         
@@ -389,7 +389,7 @@ export const SwappingManager = GObject.registerClass({
     _swapTiledWindows(window1, zone1, window2, zone2, workspace, monitor) {
         if (!this._edgeTilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] Swapping tiled windows: ${window1.get_id()} ↔ ${window2.get_id()}`);
+        Logger.log(`Swapping tiled windows: ${window1.get_id()} ↔ ${window2.get_id()}`);
         
         const workArea = workspace.get_work_area_for_monitor(monitor);
         this._edgeTilingManager.applyTile(window1, zone2, workArea);
@@ -407,7 +407,7 @@ export const SwappingManager = GObject.registerClass({
     _tileToEmptyZone(window, zone, workspace, monitor) {
         if (!this._edgeTilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] Tiling window ${window.get_id()} to empty zone ${zone}`);
+        Logger.log(`Tiling window ${window.get_id()} to empty zone ${zone}`);
         const workArea = workspace.get_work_area_for_monitor(monitor);
         this._edgeTilingManager.applyTile(window, zone, workArea);
         WindowState.set(window, 'lastSwapTime', Date.now());
@@ -417,7 +417,7 @@ export const SwappingManager = GObject.registerClass({
     _expandQuarterToFull(window, currentZone, targetZone, workspace, monitor) {
         if (!this._edgeTilingManager) return false;
         
-        Logger.log(`[MOSAIC WM] Expanding quarter tile ${window.get_id()} to ${targetZone}`);
+        Logger.log(`Expanding quarter tile ${window.get_id()} to ${targetZone}`);
         const workArea = workspace.get_work_area_for_monitor(monitor);
         this._edgeTilingManager.applyTile(window, targetZone, workArea);
         WindowState.set(window, 'lastSwapTime', Date.now());
