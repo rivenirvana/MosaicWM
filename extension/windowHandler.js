@@ -116,37 +116,15 @@ export const WindowHandler = GObject.registerClass({
                         });
                         Logger.log(`Learned min size for ${win.get_id()}: ${actual.width}x${actual.height} (requested ${target.width}x${target.height})`);
 
-                        // Smart Resize failed: clear overrides and retile with overflow enabled.
-                        const ws = win.get_workspace();
-                        const mon = win.get_monitor();
-                        if (ws) {
-                            const wsWindows = this.windowingManager.getMonitorWorkspaceWindows(ws, mon);
-                            let newestWindow = null;
-                            let newestTime = 0;
-
-                            for (const w of wsWindows) {
-                                WindowState.set(w, 'targetSmartResizeSize', null);
-                                WindowState.set(w, 'isSmartResizing', false);
-
-                                const addedTime = WindowState.get(w, 'addedTime') || 0;
-                                if (addedTime > newestTime) {
-                                    newestTime = addedTime;
-                                    newestWindow = w;
-                                }
-                            }
-
-                            // Retile with actual dimensions; triggers overflow if needed.
-                            if (newestWindow) {
-                                Logger.log(`Smart resize minimum hit — retiling with overflow for ${newestWindow.get_id()}`);
-                                WindowState.set(newestWindow, 'forceOverflow', true);
-                                this.tilingManager.tileWorkspaceWindows(ws, newestWindow, mon, false);
-                            }
-                        }
-                        return;
+                        // Overflow triggers automatically if resize fails
+                        
+                        // Clear flags to allow normal tiling
+                        WindowState.set(win, 'targetSmartResizeSize', null);
+                        WindowState.set(win, 'isSmartResizing', false);
+                    } else {
+                        // Resize worked — clear target
+                        WindowState.set(win, 'targetSmartResizeSize', null);
                     }
-
-                    // Resize worked — clear target, frame is up to date
-                    WindowState.set(win, 'targetSmartResizeSize', null);
                 }
                 this.tilingManager.tileWorkspaceWindows(win.get_workspace(), null, win.get_monitor());
             }
@@ -704,6 +682,9 @@ export const WindowHandler = GObject.registerClass({
             return;
         }
 
+        // Capture natural size immediately upon arrival to a workspace
+        this._ext.tilingManager.savePreferredSize(window);
+
         // Abort any ongoing smart resize immediately to prevent 'zombie' logic
         this._ext.tilingManager.abortActiveSmartResize();
 
@@ -985,15 +966,14 @@ export const WindowHandler = GObject.registerClass({
                 // Ensure all windows are released from smart-resize state before we try to restore them
                 WindowState.set(w, 'isSmartResizing', false);
                 WindowState.set(w, 'hitMinimumSize', false);
-                // Do NOT clear preferredSize or isConstrainedByMosaic here! 
-                // preferredSize is needed for tryRestoreWindowSizes.
-                // isConstrainedByMosaic will be handled by tryRestoreWindowSizes itself.
+                // Preserve preferredSize for restoration
             }
 
             // Try to restore window sizes with freed space (Reverse Smart Resize)
             if (remainingWindows.length > 0) {
                 const workArea = this._ext.tilingManager.getUsableWorkArea(WORKSPACE, MONITOR);
-                const restored = this._ext.tilingManager.tryRestoreWindowSizes(remainingWindows, workArea, freedWidth, freedHeight, WORKSPACE, MONITOR);
+                // PASS null to force recalculation of real incremental available space
+                const restored = this._ext.tilingManager.tryRestoreWindowSizes(remainingWindows, workArea, null, null, WORKSPACE, MONITOR);
 
                 if (restored) {
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.RESIZE_SETTLE_DELAY_MS, () => {
