@@ -1840,13 +1840,25 @@ export const TilingManager = GObject.registerClass({
             return true;
         }
         
-        if (this._windowingManager.isMaximizedOrFullscreen(window)) {
-            Logger.log('canFitWindow: Window is sacred - always fits (no overflow)');
+        const isIncomingSacred = this._windowingManager.isMaximizedOrFullscreen(window);
+        const currentWindows = this._windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
+        const otherWindows = currentWindows.filter(w => w.get_id() !== window.get_id());
+        const hasExistingSacred = otherWindows.some(w => this._windowingManager.isMaximizedOrFullscreen(w));
+
+        // Symmetric Isolation Policy:
+        // 1. Sacred windows (Incoming) ONLY fit in workspaces with 0 other windows.
+        if (isIncomingSacred) {
+            if (otherWindows.length > 0) {
+                Logger.log(`canFitWindow: Incoming window is sacred but workspace ${workspace.index()} is occupied - blocked`);
+                return false;
+            }
+            Logger.log('canFitWindow: Window is sacred and workspace is empty - fits');
             return true;
         }
 
-        if (this._windowingManager.hasSacredWindow(workspace, monitor, window.get_id())) {
-            Logger.log('canFitWindow: Workspace has sacred window - blocked');
+        // 2. Normal windows (Incoming) ONLY fit in workspaces with 0 sacred windows.
+        if (hasExistingSacred) {
+            Logger.log(`canFitWindow: Incoming normal window blocked - workspace ${workspace.index()} has a sacred window`);
             return false;
         }
 

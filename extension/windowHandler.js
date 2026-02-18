@@ -444,11 +444,14 @@ export const WindowHandler = GObject.registerClass({
 
         this.tilingManager.savePreferredSize(window);
 
-        // Path 1: Sacred Isolation - Don't share workspaces with sacred windows.
-        const hasSacredWindow = this.windowingManager.hasSacredWindow(workspace, monitor, window.get_id());
+        // Path 1: Sacred Isolation - Symmetric isolation enforcement.
+        const isIncomingSacred = this.windowingManager.isMaximizedOrFullscreen(window);
+        const hasExistingSacred = this.windowingManager.hasSacredWindow(workspace, monitor, window.get_id());
+        const workspaceWindows = this.windowingManager.getMonitorWorkspaceWindows(workspace, monitor);
+        const otherWindows = workspaceWindows.filter(w => w.get_id() !== window.get_id());
 
-        if (hasSacredWindow) {
-            Logger.log('Sacred window detected - immediate overflow');
+        if (hasExistingSacred || (isIncomingSacred && otherWindows.length > 0)) {
+            Logger.log(`Sacred Isolation triggered (IncomingSacred: ${isIncomingSacred}, HasExistingSacred: ${hasExistingSacred}) - isolating`);
             this.windowingManager.moveOversizedWindow(window);
             return;
         }
