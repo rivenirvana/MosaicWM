@@ -282,7 +282,9 @@ export const ResizeHandler = GObject.registerClass({
                         this._resizeDebounceTimeout = null;
                     }
                     
-                    this._resizeDebounceTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 0, () => {
+                    // Batch events with 50ms delay to allow overflow detection and
+                    // ghost mode feedback during continuous resizing.
+                    this._resizeDebounceTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
                         this._resizeDebounceTimeout = null;
                         
                         let canFit = this.tilingManager.canFitWindow(window, workspace, monitor);
@@ -290,8 +292,7 @@ export const ResizeHandler = GObject.registerClass({
                             .filter(w => !this.edgeTilingManager.isEdgeTiled(w) && !this.windowingManager.isExcluded(w));
                         const isSolo = mosaicWindows.length <= 1;
                         
-                        // Do NOT move windows during smart resize
-                        // This prevents existing windows from being expelled when smart resize reverts
+                        // Block moves during smart resize to prevent expelling windows on revert.
                         const isSmartResizing = this.tilingManager._isSmartResizingBlocked;
 
                         if (!canFit && !this._resizeInOverflow && !isSolo && !isSmartResizing) {
@@ -299,13 +300,15 @@ export const ResizeHandler = GObject.registerClass({
                                 return GLib.SOURCE_REMOVE;
                             }
                             
+                            // GHOST MODE: Reduce opacity to signal that the window no longer fits.
                             this._resizeInOverflow = true;
                             this._resizeOverflowWindow = window;
                             const actor = window.get_compositor_private();
                             if (actor) actor.opacity = 128;
+                            Logger.log(`Resize overflow detected for window ${window.get_id()} - enabling ghost mode`);
                             this.tilingManager.tileWorkspaceWindows(workspace, null, monitor, true, false);
                         } else {
-                            // Recovery logic: if it fits again, clear overflow state
+                            // Recovery logic: if it fits again, clear overflow state and restore full opacity
                             if (canFit && this._resizeInOverflow) {
                                 this._resizeInOverflow = false;
                                 this._resizeOverflowWindow = null;
@@ -326,7 +329,6 @@ export const ResizeHandler = GObject.registerClass({
                 }
                 
                 let canFit = this.tilingManager.canFitWindow(window, workspace, monitor);
-                let fits = canFit; // Used by older logic/refactors - DO NOT REMOVE
                 const now = Date.now();
                 if (this._resizeGracePeriod && (now - this._resizeGracePeriod) < constants.REVERSE_RESIZE_PROTECTION_MS) {
                     this._sizeChanged = false;
