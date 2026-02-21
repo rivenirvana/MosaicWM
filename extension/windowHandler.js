@@ -677,6 +677,11 @@ export const WindowHandler = GObject.registerClass({
         } else {
             // Fallback for non-actor windows (rare in Shell)
             const fallbackId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
+                 // Abort if window is gone (destroyed or unmanaged)
+                 if (!window.get_compositor_private() || !window.get_workspace()) {
+                     Logger.log(`onWindowCreated fallback: window gone - aborting`);
+                     return GLib.SOURCE_REMOVE;
+                 }
                  if (processWindowCallback() === GLib.SOURCE_REMOVE) {
                      this.connectWindowSignals(window);
                      return GLib.SOURCE_REMOVE;
@@ -704,6 +709,13 @@ export const WindowHandler = GObject.registerClass({
         }
 
         // Connect to configure signal for slide-in animation setup
+        // Clean up any existing configure handler to prevent accumulation on workspace moves
+        const existingConfigureId = WindowState.get(window, 'configureSignalId');
+        if (existingConfigureId) {
+            window.disconnect(existingConfigureId);
+            WindowState.remove(window, 'configureSignalId');
+        }
+
         try {
             const configureId = window.connect('configure', (win, config) => {
                 // Only handle initial configuration (first time window is placed)
@@ -865,6 +877,12 @@ export const WindowHandler = GObject.registerClass({
         WindowState.set(window, 'addedTime', Date.now());
 
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, constants.WINDOW_VALIDITY_CHECK_INTERVAL_MS, () => {
+            // Abort if window is gone (destroyed or unmanaged)
+            if (!window.get_compositor_private() || !window.get_workspace()) {
+                Logger.log(`window-added: window ${window.get_id()} gone - aborting`);
+                return GLib.SOURCE_REMOVE;
+            }
+
             const WORKSPACE = window.get_workspace();
             const WINDOW = window;
             const MONITOR = global.display.get_primary_monitor();

@@ -97,7 +97,7 @@ export const AnimationsManager = GObject.registerClass({
             return false;
         }
         
-        if (this._animatingWindows.has(window)) {
+        if (this._animatingWindows.has(window.get_id())) {
             return false;
         }
         
@@ -135,7 +135,7 @@ export const AnimationsManager = GObject.registerClass({
             return;
         }
         
-        this._animatingWindows.add(window);
+        this._animatingWindows.add(window.get_id());
         
         const currentRect = startRect || window.get_frame_rect();
         
@@ -173,7 +173,7 @@ export const AnimationsManager = GObject.registerClass({
                 onComplete: () => {
                     if (windowActor && !windowActor.is_destroyed())
                         windowActor.set_translation(0, 0, 0);
-                    this._animatingWindows.delete(window);
+                    this._animatingWindows.delete(window.get_id());
                     this._checkAllAnimationsComplete();
                     if (onComplete) onComplete();
                 }
@@ -188,8 +188,8 @@ export const AnimationsManager = GObject.registerClass({
         windowActor.set_translation(translateX, translateY, 0);
         
         const safetyTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, duration + constants.SAFETY_TIMEOUT_BUFFER_MS, () => {
-            if (this._animatingWindows.has(window)) {
-                this._animatingWindows.delete(window);
+            if (this._animatingWindows.has(window.get_id())) {
+                this._animatingWindows.delete(window.get_id());
                 this._checkAllAnimationsComplete();
                 if (windowActor && !windowActor.is_destroyed()) {
                     try {
@@ -211,7 +211,7 @@ export const AnimationsManager = GObject.registerClass({
                 GLib.source_remove(safetyTimeout);
                 if (windowActor && !windowActor.is_destroyed())
                     windowActor.set_translation(0, 0, 0);
-                this._animatingWindows.delete(window);
+                this._animatingWindows.delete(window.get_id());
                 this._checkAllAnimationsComplete();
                 if (onComplete) onComplete();
             }
@@ -225,7 +225,7 @@ export const AnimationsManager = GObject.registerClass({
             return;
         }
         
-        this._animatingWindows.add(window);
+        this._animatingWindows.add(window.get_id());
         
         window.move_resize_frame(false, targetRect.x, targetRect.y, targetRect.width, targetRect.height);
         
@@ -242,7 +242,7 @@ export const AnimationsManager = GObject.registerClass({
             onComplete: () => {
                 windowActor.set_scale(1.0, 1.0);
                 windowActor.set_opacity(255);
-                this._animatingWindows.delete(window);
+                this._animatingWindows.delete(window.get_id());
                 this._checkAllAnimationsComplete();
             }
         });
@@ -255,7 +255,7 @@ export const AnimationsManager = GObject.registerClass({
             return;
         }
         
-        this._animatingWindows.add(window);
+        this._animatingWindows.add(window.get_id());
         
         windowActor.set_pivot_point(0.5, 0.5);
         
@@ -266,7 +266,7 @@ export const AnimationsManager = GObject.registerClass({
             duration: ANIMATION_DURATION,
             mode: ANIMATION_MODE,
             onComplete: () => {
-                this._animatingWindows.delete(window);
+                this._animatingWindows.delete(window.get_id());
                 this._checkAllAnimationsComplete();
                 if (onComplete) onComplete();
             }
@@ -286,7 +286,7 @@ export const AnimationsManager = GObject.registerClass({
             return;
         }
         
-        this._animatingWindows.add(window);
+        this._animatingWindows.add(window.get_id());
         
         const translateX = fromRect.x - toRect.x;
         const translateY = fromRect.y - toRect.y;
@@ -301,7 +301,7 @@ export const AnimationsManager = GObject.registerClass({
             mode: mode,
             onComplete: () => {
                 windowActor.set_translation(0, 0, 0);
-                this._animatingWindows.delete(window);
+                this._animatingWindows.delete(window.get_id());
                 this._checkAllAnimationsComplete();
                 if (onComplete) onComplete();
             }
