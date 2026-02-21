@@ -349,6 +349,7 @@ export const WindowHandler = GObject.registerClass({
     onWindowDestroyed(window) {
         const monitor = window.get_monitor();
         const windowId = window.get_id();
+        const windowWorkspace = window.get_workspace();
 
         Logger.log(`onWindowDestroyed: ${windowId}`);
 
@@ -374,8 +375,8 @@ export const WindowHandler = GObject.registerClass({
             return;
         }
 
-        if (monitor === global.display.get_primary_monitor()) {
-            const workspace = this.windowingManager.getWorkspace();
+        if (monitor === global.display.get_primary_monitor() && windowWorkspace) {
+            const workspace = windowWorkspace;
 
             // Capture destroyed window size for reverse smart resize
             const destroyedFrame = window.get_frame_rect();
